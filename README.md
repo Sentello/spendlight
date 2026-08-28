@@ -69,10 +69,10 @@ unusual month obvious.
 
 **Merchants & recurring** — top merchants by spend, and an automatic
 subscription detector. A counterparty is flagged as recurring when it bills
-across **≥ 4 distinct months**, **≤ 1.3 times per active month**, and with a
+across **≥ 2 distinct months**, **≤ 1.3 times per active month**, and with a
 **coefficient of variation under 0.25** — that is, roughly monthly, for roughly
 the same amount. The three conditions together separate real subscriptions from
-merchants you simply visit often: Revolut, Grok, VPS and ChatGPT are caught,
+merchants you simply visit often: Revolut, Grok, VPS, ChatGPT and Claude are caught,
 while Lidl and Albert — which recur just as reliably, but at wildly varying
 amounts several times a month — correctly are not. Tune the thresholds at the
 top of `spendlight.py`.

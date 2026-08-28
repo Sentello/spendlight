@@ -53,7 +53,7 @@ CURRENCIES = {
 DATE_FORMATS = ["%m/%d/%y", "%d/%m/%y", "%Y-%m-%d", "%d.%m.%Y", "%m/%d/%Y", "%d/%m/%Y"]
 
 # Thresholds: many months, about once a month, about the same amount.
-RECURRING_MIN_MONTHS = 4
+RECURRING_MIN_MONTHS = 2
 RECURRING_MAX_PER_MONTH = 1.3
 RECURRING_MAX_CV = 0.25
 
