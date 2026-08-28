@@ -249,6 +249,30 @@ function draw(id, config) {
   return charts[id];
 }
 
+/* A canvas cannot hold a message, so a plot that can legitimately come back
+ * empty gets a sibling note and hides the canvas. Passing '' means "there is
+ * something to draw"; a message means there is not, and says why. Returns
+ * whether the plot is blank, so callers can bail out. */
+function plotNote(key, message) {
+  const canvas = document.getElementById('c-' + key);
+  const note = document.getElementById(key + '-empty');
+  const blank = Boolean(message);
+  canvas.hidden = blank;
+  note.hidden = !blank;
+  note.textContent = message || '';
+  if (blank && charts['c-' + key]) {
+    charts['c-' + key].destroy();
+    delete charts['c-' + key];
+  }
+  return blank;
+}
+
+/* The category, merchant, day and search filters narrow both sides of the
+ * ledger at once. Income rows carry almost none of those values — salary has
+ * no counterparty and sits in its own category — so any of them active means
+ * the income side is empty by construction, not because a month went unpaid. */
+const narrowingFilter = () => Boolean(S.parent || S.cat || S.merchant || S.day || S.q);
+
 const tooltipStyle = {
   backgroundColor: '#0a1020',
   borderColor: GRID,
@@ -770,6 +794,11 @@ function renderFlow() {
     months.map((ym, i) => [prettyMonth(ym), fmt(income[i]), fmt(spend[i]), fmt(net[i]),
       income[i] > 0 ? pct(net[i] / income[i]) : '—']));
 
+  if (plotNote('flow', months.length ? '' : 'Nothing in this selection.')) {
+    document.getElementById('flow-note').textContent = '';
+    return;
+  }
+
   // Three measures, one currency, one axis. A second y-scale would invent a
   // relationship between them that the data does not contain.
   draw('c-flow', {
@@ -803,10 +832,18 @@ function renderFlow() {
     },
   });
 
+  /* Naming every month is useful for a gap or two and turns into noise once
+   * the whole range is listed — which is exactly what a narrowing filter does,
+   * for a reason worth stating instead. */
   const noIncome = months.filter((ym) => !((stats.get(ym) || {}).income));
-  document.getElementById('flow-note').textContent = noIncome.length
-    ? `No income recorded in ${noIncome.map(prettyMonth).join(', ')} — the savings rate is not meaningful there.`
-    : '';
+  document.getElementById('flow-note').textContent =
+    !noIncome.length ? ''
+      : noIncome.length < months.length
+        ? `No income recorded in ${noIncome.map(prettyMonth).join(', ')} — the savings rate is not meaningful there.`
+        : narrowingFilter()
+          ? 'No income in this selection: the filters above narrow income and spending together, '
+            + 'and your income rows carry no merchant or spending category. Clear them to compare the two sides.'
+          : 'No income recorded in this range, so the savings rate is not meaningful here.';
 }
 
 function renderRate() {
@@ -827,6 +864,16 @@ function renderRate() {
     months.map((ym, i) => [prettyMonth(ym),
       rate[i] === null ? '—' : rate[i].toFixed(1) + '%',
       rolling[i] === null ? '—' : rolling[i].toFixed(1) + '%']));
+
+  /* Every point null draws an axis and nothing else, which reads as a broken
+   * chart rather than as "this selection has no income to save out of". */
+  if (plotNote('rate', rate.some((v) => v !== null) ? '' : (!months.length
+    ? 'Nothing in this selection.'
+    : narrowingFilter()
+      ? 'No income in this selection, so there is no savings rate. The filters above narrow '
+        + 'income and spending together, and your income rows carry no merchant or spending '
+        + 'category. Clear them to see the rate.'
+      : 'No income recorded in this range, so there is no savings rate to show.'))) return;
 
   draw('c-rate', {
     type: 'line',
@@ -1041,17 +1088,10 @@ function renderMerchants() {
    * full: a row only counts here if the CSV named a Counterparty, and plenty
    * of rows (rent, parking, utilities) never do. A bare canvas reads as a
    * broken chart, so say which of the two it is. */
-  const canvas = document.getElementById('c-merch');
-  const note = document.getElementById('merch-empty');
-  const blank = !rows.length;
-  canvas.hidden = blank;
-  note.hidden = !blank;
-  if (blank) {
-    if (charts['c-merch']) { charts['c-merch'].destroy(); delete charts['c-merch']; }
-    note.textContent = all.length
-      ? `No merchant names in this selection. All ${group(String(all.length))} `
-        + `${all.length === 1 ? 'row has' : 'rows have'} an empty Counterparty in the CSV.`
-      : 'Nothing in this selection.';
+  if (plotNote('merch', rows.length ? '' : (all.length
+    ? `No merchant names in this selection. All ${group(String(all.length))} `
+      + `${all.length === 1 ? 'row has' : 'rows have'} an empty Counterparty in the CSV.`
+    : 'Nothing in this selection.'))) {
     setTable('merch', ['Merchant', 'Total', 'Visits', 'Average'], []);
     return;
   }

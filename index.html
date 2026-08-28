@@ -440,7 +440,10 @@ footer { color: var(--ink-3); font-size: 12px; margin-top: 28px; padding-top: 16
         </div>
       </div>
       <p class="card-sub">Every month in the selected range, in one scale.</p>
-      <div class="plot"><canvas id="c-flow" height="270"></canvas></div>
+      <div class="plot">
+        <canvas id="c-flow" height="270"></canvas>
+        <div class="empty" id="flow-empty" hidden></div>
+      </div>
       <div id="flow-table" hidden class="tbl-scroll"></div>
       <p class="note-inline" id="flow-note"></p>
     </div>
@@ -453,7 +456,10 @@ footer { color: var(--ink-3); font-size: 12px; margin-top: 28px; padding-top: 16
         </div>
       </div>
       <p class="card-sub">Share of income kept each month, with a 3-month average to smooth the spikes.</p>
-      <div class="plot"><canvas id="c-rate" height="240"></canvas></div>
+      <div class="plot">
+        <canvas id="c-rate" height="240"></canvas>
+        <div class="empty" id="rate-empty" hidden></div>
+      </div>
       <div id="rate-table" hidden class="tbl-scroll"></div>
     </div>
     <div class="card">
