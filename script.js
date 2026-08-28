@@ -234,7 +234,11 @@ const hideTip = () => { TIP.style.opacity = '0'; };
 Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
 Chart.defaults.font.size = 12;
 Chart.defaults.color = INK2;
-Chart.defaults.animation.duration = 260;
+/* The KPI count-up checks prefers-reduced-motion; the charts have to as well,
+ * or "reduce motion" still gets 260ms of bars growing out of the axis. Off
+ * also means a chart is correct the instant it paints, so a screenshot taken
+ * on load shows real bar lengths. (reduceMotion is a hoisted declaration.) */
+Chart.defaults.animation = reduceMotion() ? false : { duration: 260 };
 Chart.defaults.maintainAspectRatio = false;
 
 const charts = {};
@@ -552,8 +556,17 @@ function renderTreemap() {
     return;
   }
 
+  /* Two layouts to satisfy. In the two-column bento the card is a flex column
+   * and #tm-plot is its leftover space (flex-basis 0), so clientHeight is the
+   * room the row gives us and does not depend on the SVG already inside it.
+   * Stacked in one column the card is content-sized, and only the width can
+   * say how tall the poster should be — reading clientHeight there would just
+   * echo the previous render and creep upward on every resize. */
   const width = Math.max(320, host.clientWidth || 900);
-  const height = Math.max(280, Math.min(560, Math.round(width * (width > 700 ? 0.58 : 0.42))));
+  const aspect = Math.round(width * (width > 700 ? 0.58 : 0.42));
+  const stretched = getComputedStyle(host.parentElement).display === 'flex';
+  const room = stretched ? host.clientHeight : 0;
+  const height = Math.max(280, Math.min(760, room > 280 ? room : aspect));
   const svg = svgEl('svg', { width: '100%', height, viewBox: `0 0 ${width} ${height}` });
   const tiles = squarify(items, 0, 0, width, height);
 

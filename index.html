@@ -27,8 +27,13 @@
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
   --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
   --s-other: #5a6478;
-  --accent: #c98500;
-  --accent-dim: rgba(201, 133, 0, 0.18);
+  /* A brighter lamp amber than the data gold --s4 (#c98500), which it used to
+   * duplicate exactly — chrome and a category then wore the same colour, so
+   * the active tab and the Housing tile were indistinguishable. Separation
+   * from every categorical slot is >= 17.6 (OKLab dE x100, normal vision),
+   * and it sits at 10.7:1 on --surface. */
+  --accent: #f5c451;
+  --accent-dim: rgba(245, 196, 81, 0.16);
   --accent-ink: #140e04;
 
   --q0: #172136; --q1: #184f95; --q2: #256abf; --q3: #3987e5;
@@ -178,6 +183,16 @@ input:focus-visible, select:focus-visible, button:focus-visible, [tabindex]:focu
   align-items: stretch;
 }
 .bento-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+/* The treemap is the poster of this bento, and its card stretches to the side
+ * column's height. Without this the plot kept a width-derived height and left
+ * a large gap under itself; flex-basis 0 makes #tm-plot the row's leftover
+ * space, which renderTreemap then measures. Only while the bento is actually
+ * two columns — stacked, the card is content-sized and a flex child with
+ * basis 0 cannot grow, so the SVG would overflow it. */
+@media (min-width: 1041px) {
+  .bento-cat > .card { display: flex; flex-direction: column; }
+  .bento-cat > .card > #tm-plot { flex: 1 1 0; min-height: 300px; }
+}
 .bento-side .card, .bento-cat > .card { margin-bottom: 0; }
 .bento-side .card { flex: 1; }
 @media (max-width: 1040px) {
