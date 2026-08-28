@@ -86,7 +86,6 @@ function inkOn(hex) {
 const PARENT_COLOR = (() => {
   const totals = new Map();
   for (const row of ROWS) {
-    if (row.kind !== 'expense') continue;
     totals.set(row.parent, (totals.get(row.parent) || 0) + row.amt);
   }
   const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1]);
@@ -316,7 +315,7 @@ function renderKpis() {
     { label: 'Total spent', value: fmt(spend), note: `${months} month${months === 1 ? '' : 's'} in view`, hero: true },
     { label: 'Income', value: fmt(income), note: income ? `${fmt(income / months)} a month` : 'none in range' },
     { label: 'Net saved', value: fmt(net), note: 'income minus spending', tone: net >= 0 ? 'up' : 'down' },
-    { label: 'Savings rate', value: rate === null ? '—' : pct(rate), note: rate === null ? 'no income in range' : 'of income kept', tone: rate !== null && rate >= 0 ? 'up' : 'down' },
+    { label: 'Savings rate', value: rate === null ? '—' : pct(rate), note: rate === null ? 'no income in range' : 'of income kept', tone: rate === null ? undefined : (rate >= 0 ? 'up' : 'down') },
     { label: 'Avg spend / month', value: fmt(spend / months), note: `${fmt(spend / Math.max(1, daysInView()))} a day` },
     { label: 'Transactions', value: group(String(rows.length)), note: (() => {
         const n = new Set(rows.map((r) => r.cp).filter(Boolean)).size;
@@ -442,11 +441,17 @@ function renderTreemap() {
   const totals = new Map();
   for (const row of rows) {
     if (S.drill && row.parent !== S.drill) continue;
-    const key = S.drill ? (row.child || '(none)') : row.parent;
-    totals.set(key, (totals.get(key) || 0) + row.amt);
+    const id = S.drill ? row.cat : row.parent;
+    if (!totals.has(id)) {
+      totals.set(id, {
+        name: S.drill ? (row.child || '(no subcategory)') : row.parent,
+        value: 0,
+        cat: id,
+      });
+    }
+    totals.get(id).value += row.amt;
   }
-  const items = [...totals.entries()].map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value);
+  const items = [...totals.values()].sort((a, b) => b.value - a.value);
   const grand = sum(items, (i) => i.value);
 
   setTable('tm', [S.drill ? 'Subcategory' : 'Category', 'Total', 'Share'],
@@ -515,8 +520,21 @@ function renderTreemap() {
 
     const activate = () => {
       hideTip();
-      if (S.drill) { S.cat = `${S.drill} > ${tile.name}`; }
-      else { S.drill = tile.name; }
+      if (S.drill) {
+        S.cat = tile.cat;
+        S.parent = '';
+        S.drill = null;
+        syncControls();
+      } else {
+        const named = (CATEGORY_TREE[tile.name] || []).filter(Boolean);
+        if (named.length) {
+          S.drill = tile.name;
+        } else {
+          S.parent = tile.name;
+          S.cat = '';
+          syncControls();
+        }
+      }
       render();
     };
     group.addEventListener('click', activate);
@@ -605,6 +623,7 @@ function renderLeafBars() {
       onClick: (_e, els) => {
         if (!els.length) return;
         S.cat = top[els[0].index][0];
+        S.parent = '';
         S.drill = null;
         syncControls();
         render();
@@ -1268,14 +1287,19 @@ function buildFilterUI() {
     S.parent = value.startsWith('P:') ? value.slice(2) : '';
     S.cat = value.startsWith('C:') ? value.slice(2) : '';
     S.drill = null;
+    syncControls();
     render();
   });
 
   document.getElementById('f-from').addEventListener('change', (e) => {
-    S.from = e.target.value || META.first; render();
+    S.from = e.target.value || META.first;
+    syncControls();
+    render();
   });
   document.getElementById('f-to').addEventListener('change', (e) => {
-    S.to = e.target.value || META.last; render();
+    S.to = e.target.value || META.last;
+    syncControls();
+    render();
   });
 
   let searchTimer;
@@ -1329,12 +1353,20 @@ function selectTab(name) {
   render();
 }
 
+function categorySelectValue() {
+  if (S.cat.includes(' > ')) return 'C:' + S.cat;
+  if (S.cat) {
+    const named = (CATEGORY_TREE[S.cat] || []).filter(Boolean);
+    return named.length ? '' : 'P:' + S.cat;
+  }
+  return S.parent ? 'P:' + S.parent : '';
+}
+
 /** Push state back into the controls, so chart clicks and chips stay in sync. */
 function syncControls() {
   document.getElementById('f-from').value = S.from;
   document.getElementById('f-to').value = S.to;
-  document.getElementById('f-parent').value =
-    S.cat ? 'C:' + S.cat : (S.parent ? 'P:' + S.parent : '');
+  document.getElementById('f-parent').value = categorySelectValue();
   document.querySelectorAll('#f-kind button').forEach((b) =>
     b.setAttribute('aria-pressed', String(b.dataset.kind === S.kind)));
   const active = activePreset();

@@ -189,11 +189,10 @@ def find_recurring(records):
 
 
 def category_tree(records):
-    """{parent: [child, ...]} over expenses, for the drill-down and filter UI."""
+    """{parent: [child, ...]} over every row, so Income (Salary, …) is filterable."""
     tree = defaultdict(set)
     for rec in records:
-        if rec["kind"] == "expense":
-            tree[rec["parent"]].add(rec["child"])
+        tree[rec["parent"]].add(rec["child"])
     return {parent: sorted(children) for parent, children in sorted(tree.items())}
 
 
@@ -247,7 +246,7 @@ def serve(port):
     handler = functools.partial(
         http.server.SimpleHTTPRequestHandler, directory=SCRIPT_DIR)
     with http.server.ThreadingHTTPServer(("127.0.0.1", port), handler) as httpd:
-        url = f"http://localhost:{port}/index.html"
+        url = f"http://127.0.0.1:{port}/index.html"
         print(f"\n  serving {url}   (ctrl-c to stop)")
         webbrowser.open(url)
         try:
