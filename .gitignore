@@ -1,0 +1,60 @@
+# ---------------------------------------------------------------------------
+# Personal financial data — NEVER commit these.
+# ---------------------------------------------------------------------------
+# Your My Expenses export: every transaction, merchant and amount you have.
+*.csv
+
+# Generated from that export, and just as sensitive — it embeds the full
+# transaction list as JSON. Rebuild it any time with `python3 spendlight.py`.
+data.js
+
+# Screenshots of the dashboard show real balances and salary figures.
+# Keep the folder, but commit an image only after checking what is in it.
+screenshots/
+*.png
+*.jpg
+*.jpeg
+!docs/demo-*.png
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtualenvs — Spendlight needs none, but you may create one anyway.
+.venv/
+venv/
+env/
+ENV/
+pyvenv.cfg
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---------------------------------------------------------------------------
+# Editors & OS
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ---------------------------------------------------------------------------
+# Local scratch
+# ---------------------------------------------------------------------------
+_*.html
+*.log

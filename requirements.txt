@@ -1,0 +1,16 @@
+# Spendlight has NO third-party dependencies — this file is intentionally empty.
+#
+# Everything the app needs ships with Python itself: csv, json, argparse,
+# statistics, http.server, webbrowser, glob, functools, datetime, os, sys.
+# So there is nothing to install and no virtualenv to create:
+#
+#     python3 spendlight.py --serve
+#
+# That matters on distributions that mark the system Python as externally
+# managed (PEP 668 — Arch, Manjaro, Debian, Fedora), where `pip install`
+# refuses to touch the system environment. Spendlight sidesteps that entirely.
+#
+# `pip install -r requirements.txt` succeeds here and installs nothing.
+#
+# The dashboard loads Chart.js from a CDN in the browser at runtime; it is not
+# a Python package and does not belong in this file.

@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spendlight</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  color-scheme: dark;
+  --page: #0b1121;
+  --surface: #151e32;
+  --surface-2: #0f172a;
+  --border: #1e293b;
+  --border-soft: rgba(255,255,255,0.07);
+
+  --ink: #f8fafc;
+  --ink-2: #94a3b8;
+  --ink-3: #64748b;
+  --grid: #1e293b;
+  --axis: #2c3a52;
+
+  /* Categorical slots — validated for this surface (see README) */
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  --s-other: #5a6478;
+
+  /* Sequential blue, dark surface: near-surface = near zero */
+  --q0: #172136; --q1: #184f95; --q2: #256abf; --q3: #3987e5;
+  --q4: #6da7ec; --q5: #9ec5f4;
+
+  --good: #0ca30c;
+  --critical: #d03b3b;
+  --radius: 12px;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 24px;
+  background: var(--page); color: var(--ink);
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 14px; line-height: 1.5;
+}
+.wrap { max-width: 1440px; margin: 0 auto; }
+
+/* --- header --- */
+header {
+  display: flex; justify-content: space-between; align-items: baseline;
+  flex-wrap: wrap; gap: 12px;
+  border-bottom: 1px solid var(--border); padding-bottom: 18px; margin-bottom: 20px;
+}
+h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.4px; }
+h1 .dot { color: var(--s4); }
+.sub { color: var(--ink-3); font-size: 12px; }
+
+/* --- filter row: one row, above everything it scopes --- */
+.filters {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px 18px; margin-bottom: 16px;
+  display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-end;
+}
+.fgroup { display: flex; flex-direction: column; gap: 7px; }
+.fgroup > label {
+  font-size: 11px; font-weight: 600; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.6px;
+}
+.frow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+input[type="date"], input[type="search"], select {
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--ink);
+  padding: 8px 11px; border-radius: 7px; font: inherit; font-size: 13px; outline: none;
+  height: 36px;
+}
+input[type="search"] { min-width: 200px; }
+input:focus-visible, select:focus-visible, button:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--s1); outline-offset: 2px;
+}
+.seg { display: flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px; overflow: hidden; height: 36px; }
+.seg button {
+  background: none; border: none; color: var(--ink-2); font: inherit; font-size: 13px;
+  padding: 0 14px; cursor: pointer; font-weight: 500;
+}
+.seg button[aria-pressed="true"] { background: var(--s1); color: #fff; font-weight: 600; }
+.preset { display: flex; gap: 6px; flex-wrap: wrap; }
+.preset button {
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--ink-2);
+  font: inherit; font-size: 12px; padding: 7px 11px; border-radius: 7px; cursor: pointer;
+}
+.preset button:hover { background: var(--border); color: var(--ink); }
+.preset button[aria-pressed="true"] { border-color: var(--s1); color: var(--ink); }
+.btn {
+  background: var(--border); border: 1px solid transparent; color: var(--ink);
+  font: inherit; font-size: 13px; font-weight: 600; padding: 0 16px; height: 36px;
+  border-radius: 7px; cursor: pointer;
+}
+.btn:hover { background: #2b3a55; }
+
+/* --- active filter chips --- */
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; min-height: 0; }
+.chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--surface); border: 1px solid var(--s1); color: var(--ink);
+  font-size: 12px; padding: 5px 8px 5px 11px; border-radius: 999px;
+}
+.chip button {
+  background: none; border: none; color: var(--ink-2); cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 0 2px;
+}
+.chip button:hover { color: var(--ink); }
+
+/* --- KPI tiles --- */
+.kpis {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px; margin-bottom: 22px;
+}
+.kpi {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px 18px;
+}
+.kpi .label {
+  font-size: 11px; font-weight: 600; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 9px;
+}
+.kpi .value { font-size: 23px; font-weight: 600; letter-spacing: -0.5px; }
+.kpi.hero .value { font-size: 31px; font-weight: 700; }
+.kpi .note { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+.up { color: var(--good); } .down { color: var(--critical); }
+
+/* --- tabs --- */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 20px; flex-wrap: wrap; }
+.tabs button {
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--ink-2); font: inherit; font-size: 14px; font-weight: 500;
+  padding: 11px 16px; cursor: pointer; margin-bottom: -1px;
+}
+.tabs button:hover { color: var(--ink); }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--s1); font-weight: 600; }
+[role="tabpanel"][hidden] { display: none; }
+
+/* --- cards & charts --- */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.grid-32 { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; margin-bottom: 16px; }
+@media (max-width: 1040px) { .grid-2, .grid-32 { grid-template-columns: 1fr; } }
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 18px; margin-bottom: 16px;
+  min-width: 0;
+}
+.card-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 12px; margin-bottom: 4px;
+}
+.card-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.card-head .hint { font-size: 12px; color: var(--ink-3); font-weight: 400; }
+.card-sub { font-size: 12px; color: var(--ink-3); margin: 0 0 14px; }
+.tbtn {
+  background: none; border: 1px solid var(--border); color: var(--ink-3);
+  font: inherit; font-size: 11px; font-weight: 600; padding: 4px 9px;
+  border-radius: 6px; cursor: pointer; white-space: nowrap;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.tbtn:hover { color: var(--ink); border-color: var(--ink-3); }
+.tbtn[aria-pressed="true"] { color: var(--ink); border-color: var(--s1); }
+.plot { position: relative; }
+.plot canvas { display: block; }
+
+/* --- data tables --- */
+.tbl-scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td {
+  text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+th:first-child, td:first-child { text-align: left; font-variant-numeric: normal; }
+thead th {
+  color: var(--ink-3); font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.5px; position: sticky; top: 0; background: var(--surface);
+  cursor: pointer; user-select: none;
+}
+thead th:hover { color: var(--ink); }
+tbody tr:hover { background: var(--surface-2); }
+td.pos { color: var(--good); }
+.clickable { cursor: pointer; }
+.clickable:hover { text-decoration: underline; }
+
+/* --- treemap & heatmap (plain SVG) --- */
+.crumb { display: flex; gap: 6px; align-items: center; font-size: 13px; margin-bottom: 12px; color: var(--ink-3); }
+.crumb button { background: none; border: none; color: var(--s1); font: inherit; cursor: pointer; padding: 0; }
+.crumb button:hover { text-decoration: underline; }
+svg { display: block; max-width: 100%; }
+svg text { font-family: 'Inter', system-ui, sans-serif; }
+.tile { cursor: pointer; }
+.tile rect { transition: opacity .12s; }
+.tile:hover rect, .tile:focus-visible rect { opacity: .82; }
+.cell { cursor: pointer; }
+.cell:hover, .cell:focus-visible { stroke: var(--ink); stroke-width: 1.5px; }
+
+/* --- tooltip --- */
+#tip {
+  position: fixed; z-index: 50; pointer-events: none; opacity: 0;
+  transition: opacity .1s; background: #0a1020; border: 1px solid var(--border);
+  border-radius: 8px; padding: 9px 11px; font-size: 12px; max-width: 260px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+#tip .t-title { color: var(--ink-2); margin-bottom: 5px; font-size: 11px; }
+#tip .t-row { display: flex; align-items: center; gap: 7px; margin-top: 3px; }
+#tip .t-key { width: 12px; height: 2px; border-radius: 1px; flex: none; }
+#tip .t-val { font-weight: 600; font-variant-numeric: tabular-nums; }
+#tip .t-name { color: var(--ink-2); }
+
+/* --- misc --- */
+.legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+.legend i.line { height: 3px; width: 14px; border-radius: 2px; }
+.subs { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+.sub-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 15px; }
+.sub-card .name { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+.sub-card .cat { font-size: 11px; color: var(--ink-3); margin-bottom: 10px; }
+.sub-card .cost { font-size: 21px; font-weight: 600; letter-spacing: -0.3px; }
+.sub-card .yr { font-size: 12px; color: var(--ink-3); margin-bottom: 8px; }
+.empty { color: var(--ink-3); padding: 28px 0; text-align: center; font-size: 13px; }
+.note-inline { font-size: 12px; color: var(--ink-3); margin-top: 12px; }
+footer { color: var(--ink-3); font-size: 12px; margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--border); }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Spendlight<span class="dot">.</span></h1>
+      <div class="sub" id="hdr-sub">loading…</div>
+    </div>
+    <div class="sub" id="hdr-gen"></div>
+  </header>
+
+  <!-- One filter row, scoping everything below it -->
+  <div class="filters" role="search">
+    <div class="fgroup">
+      <label for="f-from">Date range</label>
+      <div class="frow">
+        <input type="date" id="f-from" aria-label="From date">
+        <span class="sub">to</span>
+        <input type="date" id="f-to" aria-label="To date">
+      </div>
+    </div>
+    <div class="fgroup">
+      <label>Quick range</label>
+      <div class="preset" id="f-presets"></div>
+    </div>
+    <div class="fgroup">
+      <label for="f-parent">Category</label>
+      <select id="f-parent"><option value="">All categories</option></select>
+    </div>
+    <div class="fgroup">
+      <label for="f-search">Search</label>
+      <input type="search" id="f-search" placeholder="merchant or category…">
+    </div>
+    <div class="fgroup">
+      <label>Show</label>
+      <div class="seg" id="f-kind" role="group" aria-label="Transaction kind">
+        <button data-kind="expense" aria-pressed="true">Expenses</button>
+        <button data-kind="income" aria-pressed="false">Income</button>
+        <button data-kind="all" aria-pressed="false">Both</button>
+      </div>
+    </div>
+    <div class="fgroup">
+      <label>&nbsp;</label>
+      <button class="btn" id="f-reset">Reset</button>
+    </div>
+  </div>
+
+  <div class="chips" id="chips" aria-live="polite" aria-label="Active filters"></div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" id="tab-cat" aria-controls="p-cat" aria-selected="true">Categories</button>
+    <button role="tab" id="tab-trend" aria-controls="p-trend" aria-selected="false">Trends</button>
+    <button role="tab" id="tab-merch" aria-controls="p-merch" aria-selected="false">Merchants &amp; recurring</button>
+    <button role="tab" id="tab-cal" aria-controls="p-cal" aria-selected="false">Calendar &amp; transactions</button>
+  </div>
+
+  <!-- ============ CATEGORIES ============ -->
+  <section role="tabpanel" id="p-cat" aria-labelledby="tab-cat">
+    <div class="card">
+      <div class="card-head">
+        <h2>Where the money goes</h2>
+        <button class="tbtn" data-table="tm">Table</button>
+      </div>
+      <p class="card-sub">Area is spend. Click a tile to drill into its subcategories.</p>
+      <div class="crumb" id="tm-crumb"></div>
+      <div id="tm-plot"></div>
+      <div id="tm-table" hidden class="tbl-scroll"></div>
+    </div>
+    <div class="grid-32">
+      <div class="card">
+        <div class="card-head">
+          <h2>Spend by month and category</h2>
+          <button class="tbtn" data-table="stack">Table</button>
+        </div>
+        <p class="card-sub">Top categories stacked; the rest grouped as Other.</p>
+        <div class="plot"><canvas id="c-stack" height="300"></canvas></div>
+        <div id="stack-table" hidden class="tbl-scroll"></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h2>Biggest subcategories</h2>
+          <button class="tbtn" data-table="leaf">Table</button>
+        </div>
+        <p class="card-sub">Top 15 in the current selection. Click a bar to filter.</p>
+        <div class="plot"><canvas id="c-leaf" height="300"></canvas></div>
+        <div id="leaf-table" hidden class="tbl-scroll"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TRENDS ============ -->
+  <section role="tabpanel" id="p-trend" aria-labelledby="tab-trend" hidden>
+    <div class="card">
+      <div class="card-head">
+        <h2>Income, spending and what is left</h2>
+        <button class="tbtn" data-table="flow">Table</button>
+      </div>
+      <p class="card-sub">Every month in the selected range, in one scale.</p>
+      <div class="plot"><canvas id="c-flow" height="270"></canvas></div>
+      <div id="flow-table" hidden class="tbl-scroll"></div>
+      <p class="note-inline" id="flow-note"></p>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>Savings rate</h2>
+        <button class="tbtn" data-table="rate">Table</button>
+      </div>
+      <p class="card-sub">Share of income kept each month, with a 3-month average to smooth the spikes.</p>
+      <div class="plot"><canvas id="c-rate" height="240"></canvas></div>
+      <div id="rate-table" hidden class="tbl-scroll"></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>Month by month, by category</h2>
+        <span class="hint">Shaded by distance from each category's own median month</span>
+      </div>
+      <p class="card-sub">Blue means a heavier month than usual for that category. Click a category name to filter.</p>
+      <div class="tbl-scroll" id="mom-table"></div>
+    </div>
+  </section>
+
+  <!-- ============ MERCHANTS ============ -->
+  <section role="tabpanel" id="p-merch" aria-labelledby="tab-merch" hidden>
+    <div class="card">
+      <div class="card-head">
+        <h2>Recurring costs</h2>
+        <span class="hint" id="rec-count"></span>
+      </div>
+      <p class="card-sub">Merchants that bill about once a month for about the same amount. Detected across your whole history, not just the current filter.</p>
+      <div class="subs" id="rec-list"></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>Top merchants</h2>
+        <button class="tbtn" data-table="merch">Table</button>
+      </div>
+      <p class="card-sub">Top 25 by spend in the current selection. Click a bar to filter.</p>
+      <div class="plot"><canvas id="c-merch" height="520"></canvas></div>
+      <div id="merch-table" hidden class="tbl-scroll"></div>
+    </div>
+  </section>
+
+  <!-- ============ CALENDAR ============ -->
+  <section role="tabpanel" id="p-cal" aria-labelledby="tab-cal" hidden>
+    <div class="card">
+      <div class="card-head">
+        <h2>Daily spending</h2>
+        <button class="tbtn" data-table="cal">Table</button>
+      </div>
+      <p class="card-sub">One square per day. Darker to lighter is quiet to heavy. Click a day to filter.</p>
+      <div id="cal-plot"></div>
+      <div id="cal-table" hidden class="tbl-scroll"></div>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head">
+          <h2>By day of week</h2>
+          <button class="tbtn" data-table="dow">Table</button>
+        </div>
+        <p class="card-sub">Total spend per weekday in the current selection.</p>
+        <div class="plot"><canvas id="c-dow" height="240"></canvas></div>
+        <div id="dow-table" hidden class="tbl-scroll"></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h2>By day of month</h2>
+          <button class="tbtn" data-table="dom">Table</button>
+        </div>
+        <p class="card-sub">Does spending cluster around payday?</p>
+        <div class="plot"><canvas id="c-dom" height="240"></canvas></div>
+        <div id="dom-table" hidden class="tbl-scroll"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>Transactions</h2>
+        <span class="hint" id="txn-count"></span>
+      </div>
+      <p class="card-sub">Every row in the current selection. Click a column header to sort.</p>
+      <div class="tbl-scroll" id="txn-table"></div>
+    </div>
+  </section>
+
+  <footer id="foot"></footer>
+</div>
+
+<div id="tip" role="tooltip"></div>
+
+<script src="data.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
