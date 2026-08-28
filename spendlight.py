@@ -49,6 +49,12 @@ CURRENCIES = {
     "DKK": {"symbol": "kr", "position": "suffix", "thousands": NBSP, "decimal": ",", "decimals": 2},
 }
 
+# The columns the dashboard is built from. Without this check a renamed or
+# missing Income/Expense column reads as an empty string on every row, which
+# money() turns into 0.0 — a full dashboard of zero-amount expenses and no
+# error anywhere. Fail loudly instead.
+REQUIRED_COLUMNS = ("Date", "Income", "Expense", "Category")
+
 # The export's date format follows the phone's locale, so never assume one.
 DATE_FORMATS = ["%m/%d/%y", "%d/%m/%y", "%Y-%m-%d", "%d.%m.%Y", "%m/%d/%Y", "%d/%m/%Y"]
 
@@ -60,10 +66,16 @@ RECURRING_MAX_PER_MONTH = 1.3
 RECURRING_MAX_CV = 0.25
 RECURRING_MIN_COVERAGE = 0.5
 RECURRING_MAX_AGE_MONTHS = 1
+# Walking back from the newest charge, a hole bigger than this ends the run.
+RECURRING_MAX_SKIP_MONTHS = 2
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 UNCATEGORIZED = "Uncategorized"
 LOCAL_CONFIG = os.path.join(SCRIPT_DIR, "spendlight.local.json")
+
+
+# The keys that spell out a currency by hand; --currency replaces exactly these.
+SPEC_KEYS = ("symbol", "position", "thousands", "decimal", "decimals")
 
 
 def _currency_codes():
@@ -100,15 +112,31 @@ def resolve_currency(cli_code):
                 f"For anything else, put symbol/position/thousands/decimal/decimals "
                 f"in {os.path.basename(LOCAL_CONFIG)}."
             )
-        local = {"currency": code}
+        # Keep whatever else the user put in the file; only the keys that
+        # spell out a currency are this flag's to replace. Dropping them
+        # silently would leave a hand-written symbol quietly overriding the
+        # code that was just asked for.
+        custom = [key for key in SPEC_KEYS if key in local]
+        if custom:
+            print(f"  note: --currency {code} dropped the custom "
+                  f"{', '.join(custom)} in {os.path.basename(LOCAL_CONFIG)}.")
+        local = {k: v for k, v in local.items() if k not in SPEC_KEYS}
+        local["currency"] = code
         _write_local(local)
     if local.get("symbol"):
+        try:
+            decimals = int(local.get("decimals", 2))
+        except (TypeError, ValueError):
+            sys.exit(
+                f"{os.path.basename(LOCAL_CONFIG)}: decimals must be a whole "
+                f"number, not {local.get('decimals')!r}."
+            )
         spec = {
             "symbol": str(local["symbol"]),
             "position": local.get("position") or "suffix",
             "thousands": local.get("thousands") if local.get("thousands") is not None else NBSP,
             "decimal": local.get("decimal") or ",",
-            "decimals": int(local.get("decimals", 2)),
+            "decimals": decimals,
             "code": (local.get("currency") or "custom").upper(),
         }
         if spec["position"] not in ("prefix", "suffix"):
@@ -216,6 +244,13 @@ def load(path):
         raw_rows = list(csv.DictReader(handle))
     if not raw_rows:
         sys.exit(f"{path} contains no rows.")
+    missing = [name for name in REQUIRED_COLUMNS if name not in raw_rows[0]]
+    if missing:
+        sys.exit(
+            f"{path} is missing expected column(s): {', '.join(missing)}.\n"
+            f"  Columns found: {', '.join(raw_rows[0])}\n"
+            "Re-export from My Expenses with the default columns."
+        )
 
     date_fmt = sniff_date_format(raw_rows)
     splits = sum(1 for row in raw_rows if (row.get("Split transaction") or "").strip())
@@ -247,7 +282,30 @@ def load(path):
             "dom": when.day,
         })
     records.sort(key=lambda r: (r["date"], r["i"]))
+    mark_refunds(records)
     return records, date_fmt, splits
+
+
+def mark_refunds(records):
+    """Re-file income rows that were booked into a spending category.
+
+    My Expenses has no refund concept, so money coming back is entered on the
+    income side — but keeping the original spending category is what makes it
+    traceable, and that shape is what identifies it here: an income row with a
+    counterparty, in a category the expense side also uses.
+
+    Neither of the two obvious treatments is right. Counting a refund as income
+    inflates the savings rate; subtracting it from its category drives that
+    month negative, because the purchase and its refund rarely share one (a
+    5,433 December charge refunded 4,685 in February would leave February at
+    -4,331, and no treemap can lay out a negative area). So a refund is its own
+    kind: outside both totals, still listed in the transactions table.
+    """
+    spend_cats = {r["cat"] for r in records if r["kind"] == "expense"}
+    for rec in records:
+        if (rec["kind"] == "income" and rec["cp"]
+                and rec["parent"] != UNCATEGORIZED and rec["cat"] in spend_cats):
+            rec["kind"] = "refund"
 
 
 # --- Whole-dataset aggregates ----------------------------------------------
@@ -256,6 +314,26 @@ def _months_between(start_ym, end_ym):
     y1, m1 = int(start_ym[:4]), int(start_ym[5:7])
     y2, m2 = int(end_ym[:4]), int(end_ym[5:7])
     return (y2 - y1) * 12 + (m2 - m1)
+
+
+def _recent_run(months):
+    """The trailing months that still belong to one subscription.
+
+    Measuring coverage from the first charge ever punishes a live subscription
+    for an unrelated one-off long before it: a single Spotify charge in May
+    2025 plus a monthly plan running since May 2026 is 5 months inside a
+    16-month span, which fails the coverage floor even though the last four
+    months are consecutive. Walk back from the newest charge instead and stop
+    at the first year-sized hole; what remains is the current run.
+
+    `months` must be sorted ascending and non-empty.
+    """
+    run = [months[-1]]
+    for ym in reversed(months[:-1]):
+        if _months_between(ym, run[0]) > RECURRING_MAX_SKIP_MONTHS:
+            break
+        run.insert(0, ym)
+    return run
 
 
 def find_recurring(records):
@@ -271,16 +349,21 @@ def find_recurring(records):
     last_ym = max(r["ym"] for r in records)
 
     found = []
-    for merchant, rows in charges.items():
-        months = {r["ym"] for r in rows}
-        if len(months) < RECURRING_MIN_MONTHS:
+    for merchant, all_rows in charges.items():
+        run = _recent_run(sorted({r["ym"] for r in all_rows}))
+        # Everything below describes the current run, not the merchant's whole
+        # history: an older episode at a different price would skew the average
+        # and the variance that decide whether this looks like a subscription.
+        in_run = set(run)
+        rows = [r for r in all_rows if r["ym"] in in_run]
+        if len(run) < RECURRING_MIN_MONTHS:
             continue
-        if len(rows) / len(months) > RECURRING_MAX_PER_MONTH:
+        if len(rows) / len(run) > RECURRING_MAX_PER_MONTH:
             continue
-        span = _months_between(min(months), max(months)) + 1
-        if len(months) / span < RECURRING_MIN_COVERAGE:
+        span = _months_between(run[0], run[-1]) + 1
+        if len(run) / span < RECURRING_MIN_COVERAGE:
             continue
-        if _months_between(max(months), last_ym) > RECURRING_MAX_AGE_MONTHS:
+        if _months_between(run[-1], last_ym) > RECURRING_MAX_AGE_MONTHS:
             continue
         amounts = [r["amt"] for r in rows]
         mean = statistics.fmean(amounts)
@@ -292,7 +375,7 @@ def find_recurring(records):
         found.append({
             "cp": merchant,
             "n": len(rows),
-            "months": len(months),
+            "months": len(run),
             "total": round(sum(amounts), 2),
             "avg": round(mean, 2),
             "cv": round(cv, 3),
@@ -318,6 +401,7 @@ def summarise(records, tree, recurring, path, date_fmt, splits, currency):
     """Print the stdout summary used to verify the numbers did not drift."""
     expense = sum(r["amt"] for r in records if r["kind"] == "expense")
     income = sum(r["amt"] for r in records if r["kind"] == "income")
+    refunds = [r for r in records if r["kind"] == "refund"]
     months = sorted({r["ym"] for r in records})
     leaves = {r["cat"] for r in records if r["kind"] == "expense"}
     uncategorized = sum(1 for r in records if r["parent"] == UNCATEGORIZED)
@@ -332,6 +416,10 @@ def summarise(records, tree, recurring, path, date_fmt, splits, currency):
     print(f"  total income       {income:,.2f}")
     print(f"  net saved          {income - expense:,.2f}  ({rate:.1f}%)")
     print(f"  uncategorized      {uncategorized} rows")
+    if refunds:
+        print(f"  refunds            {len(refunds)} row{'' if len(refunds) == 1 else 's'}, "
+              f"{sum(r['amt'] for r in refunds):,.2f} "
+              f"(income rows in a spending category; outside both totals)")
     if splits:
         print(f"  split rows         {splits} (column ignored; each line is one record)")
     print(f"  currency           {currency['code']} ({currency['symbol']})")

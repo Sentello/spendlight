@@ -88,6 +88,16 @@ function prettyMonth(ym) {
 }
 
 /** White or near-black, whichever clears contrast on the given fill. */
+/* Sequential washes need the ramp token at partial strength, and CSS custom
+ * properties hold hex. Reading the token and adding alpha here keeps the wash
+ * tied to the same scale the calendar uses, instead of an inlined literal that
+ * a theme change would leave behind. */
+function withAlpha(hex, alpha) {
+  const c = hex.replace('#', '');
+  const [r, g, b] = [0, 1, 2].map((i) => parseInt(c.substr(i * 2, 2), 16));
+  return `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
+}
+
 function inkOn(hex) {
   const c = hex.replace('#', '');
   const v = [0, 1, 2].map((i) => {
@@ -161,8 +171,8 @@ function baseRows() {
     (!q || (r.cp + ' ' + r.cat).toLowerCase().includes(q)));
 }
 
-/** Every filtered row, both kinds — for the transaction table, where listing
- *  income beside spending is exactly what "Both" should mean. */
+/** Every filtered row, whatever its kind — for the transaction table, where
+ *  listing income and refunds beside spending is what "Both" should mean. */
 function viewRows() {
   const rows = baseRows();
   return S.kind === 'all' ? rows : rows.filter((r) => r.kind === S.kind);
@@ -275,9 +285,23 @@ function spendEmptyNote() {
   const all = baseRows();
   if (!all.length) return 'Nothing in this selection.';
   const wantIncome = S.kind === 'income';
-  return `No ${wantIncome ? 'income' : 'spending'} in this selection — `
-    + `${all.length === 1 ? 'the one row here is' : `all ${group(String(all.length))} rows here are`} `
-    + `${wantIncome ? 'expenses' : 'income'}. `
+  const otherKind = wantIncome ? 'expense' : 'income';
+  const others = all.filter((r) => r.kind === otherKind).length;
+  const head = `No ${wantIncome ? 'income' : 'spending'} in this selection — `;
+  /* Refunds are neither side, so "switch Show" would only lead to a second
+   * empty chart. Name them and point at the one place they do appear. */
+  if (!others) {
+    return head + (all.length === 1
+      ? 'the one row here is a refund, which counts as neither income nor spending. '
+        + 'It is listed under Transactions.'
+      : `all ${group(String(all.length))} rows here are refunds, which count as neither `
+        + 'income nor spending. They are listed under Transactions.');
+  }
+  const subject = others === all.length
+    ? (all.length === 1 ? 'the one row here is' : `all ${group(String(all.length))} rows here are`)
+    : `${group(String(others))} of the ${group(String(all.length))} rows here `
+      + `${others === 1 ? 'is' : 'are'}`;
+  return head + `${subject} ${wantIncome ? 'expenses' : 'income'}. `
     + `Switch Show to ${wantIncome ? 'Expenses' : 'Income'}, or clear the filters.`;
 }
 
@@ -433,9 +457,11 @@ function renderKpis() {
   const netSeries = monthList.map((_, i) => incomeSeries[i] - spendSeries[i]);
   const countSeries = monthList.map((ym) => (stats.get(ym) || {}).n || 0);
   const nMerchants = new Set(rows.map((r) => r.cp).filter(Boolean)).size;
+  // Total spent is gross. When some of it came back, say so where it is read.
+  const refunded = sum(rows.filter((r) => r.kind === 'refund'), (r) => r.amt);
 
   const tiles = [
-    { label: 'Total spent', raw: spend, format: fmt, note: rangeNote(days), hero: true, spark: spendSeries, sparkColor: ACCENT },
+    { label: 'Total spent', raw: spend, format: fmt, note: refunded ? `${rangeNote(days)} · ${fmt(refunded)} refunded` : rangeNote(days), hero: true, spark: spendSeries, sparkColor: ACCENT },
     { label: 'Income', raw: income, format: fmt, note: income ? `${fmt(income / months)} a month` : 'none in range', spark: incomeSeries, sparkColor: SLOTS[0] },
     { label: 'Net saved', raw: net, format: fmt, note: 'income minus spending', tone: net >= 0 ? 'up' : 'down', spark: netSeries, sparkColor: net >= 0 ? GOOD : BAD },
     { label: 'Savings rate', raw: rate, format: (v) => (v === null || Number.isNaN(v) ? '—' : pct(v)), note: rate === null ? 'no income in range' : 'of income kept', tone: rate === null ? undefined : (rate >= 0 ? 'up' : 'down'), spark: monthList.map((_, i) => incomeSeries[i] > 0 ? netSeries[i] / incomeSeries[i] : null).filter((v) => v !== null), sparkColor: rate === null ? INK3 : (rate >= 0 ? GOOD : BAD) },
@@ -501,7 +527,9 @@ function byMonth(rows) {
   for (const row of rows) {
     if (!map.has(row.ym)) map.set(row.ym, { spend: 0, income: 0, n: 0 });
     const bucket = map.get(row.ym);
-    if (row.kind === 'expense') bucket.spend += row.amt; else bucket.income += row.amt;
+    // Refunds count as neither side; they still count as transactions.
+    if (row.kind === 'expense') bucket.spend += row.amt;
+    else if (row.kind === 'income') bucket.income += row.amt;
     bucket.n += 1;
   }
   return map;
@@ -997,7 +1025,7 @@ function renderMoM() {
       // stronger. The number is always present, so colour is never the only cue.
       if (value > 0 && mid > 0) {
         const heat = Math.max(0, Math.min(1, (value / mid - 0.6) / 1.4));
-        if (heat > 0.02) td.style.background = `rgba(57,135,229,${(heat * 0.5).toFixed(3)})`;
+        if (heat > 0.02) td.style.background = withAlpha(RAMP[2], heat * 0.5);
       }
       tr.appendChild(td);
     });
@@ -1402,7 +1430,7 @@ function renderTxns() {
     for (const col of TXN_COLS) {
       const td = document.createElement('td');
       td.textContent = col.get(row);
-      if (col.key === 'amt' && row.kind === 'income') td.className = 'pos';
+      if (col.key === 'amt' && row.kind !== 'expense') td.className = 'pos';
       tr.appendChild(td);
     }
     tbody.appendChild(tr);
@@ -1499,13 +1527,19 @@ function buildFilterUI() {
     render();
   });
 
+  /* A backwards range empties every chart at once, which reads as "you have
+   * no data here" rather than "these two dates are in the wrong order". Drag
+   * the far end along instead; syncControls writes the correction back into
+   * the input so the adjustment is visible, not silent. */
   document.getElementById('f-from').addEventListener('change', (e) => {
     S.from = e.target.value || META.first;
+    if (S.from > S.to) S.to = S.from;
     syncControls();
     render();
   });
   document.getElementById('f-to').addEventListener('change', (e) => {
     S.to = e.target.value || META.last;
+    if (S.to < S.from) S.from = S.to;
     syncControls();
     render();
   });
@@ -1528,6 +1562,7 @@ function buildFilterUI() {
     Object.assign(S, {
       from: META.first, to: META.last, parent: '', cat: '', merchant: '',
       day: '', q: '', kind: 'expense', drill: null, txnLimit: 250,
+      sort: { key: 'date', dir: -1 },
     });
     document.getElementById('f-search').value = '';
     syncControls();
