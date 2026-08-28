@@ -225,6 +225,8 @@ input:focus-visible, select:focus-visible, button:focus-visible, [tabindex]:focu
 .tseg button[aria-pressed="true"] { background: var(--accent-dim); color: var(--ink); }
 .plot { position: relative; min-height: 220px; }
 .plot canvas { display: block; }
+/* .plot canvas outranks the UA [hidden] rule, so restate it. */
+.plot canvas[hidden] { display: none; }
 
 /* --- data tables --- */
 .tbl-scroll { overflow-x: auto; }
@@ -483,7 +485,10 @@ footer { color: var(--ink-3); font-size: 12px; margin-top: 28px; padding-top: 16
         </div>
       </div>
       <p class="card-sub">Top 25 by spend in the current selection. Click a bar to filter.</p>
-      <div class="plot"><canvas id="c-merch" height="520"></canvas></div>
+      <div class="plot">
+        <canvas id="c-merch" height="520"></canvas>
+        <div class="empty" id="merch-empty" hidden></div>
+      </div>
       <div id="merch-table" hidden class="tbl-scroll"></div>
     </div>
   </section>

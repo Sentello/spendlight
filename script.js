@@ -308,6 +308,14 @@ function paintTable(key) {
   const spec = TABLES[key];
   const host = document.getElementById(key + '-table');
   if (!spec || !host) return;
+  host.textContent = '';
+  if (!spec.rows.length) {                 // a header row alone reads as a bug
+    const none = document.createElement('div');
+    none.className = 'empty';
+    none.textContent = 'Nothing in this selection.';
+    host.appendChild(none);
+    return;
+  }
   const table = document.createElement('table');
   const thead = document.createElement('thead');
   const hr = document.createElement('tr');
@@ -330,7 +338,6 @@ function paintTable(key) {
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
-  host.textContent = '';
   host.appendChild(table);
 }
 
@@ -1027,7 +1034,28 @@ function renderRecurring() {
 }
 
 function renderMerchants() {
-  const rows = spendRows().filter((r) => r.cp);
+  const all = spendRows();
+  const rows = all.filter((r) => r.cp);
+
+  /* This is the one chart that can come back empty while the selection is
+   * full: a row only counts here if the CSV named a Counterparty, and plenty
+   * of rows (rent, parking, utilities) never do. A bare canvas reads as a
+   * broken chart, so say which of the two it is. */
+  const canvas = document.getElementById('c-merch');
+  const note = document.getElementById('merch-empty');
+  const blank = !rows.length;
+  canvas.hidden = blank;
+  note.hidden = !blank;
+  if (blank) {
+    if (charts['c-merch']) { charts['c-merch'].destroy(); delete charts['c-merch']; }
+    note.textContent = all.length
+      ? `No merchant names in this selection. All ${group(String(all.length))} `
+        + `${all.length === 1 ? 'row has' : 'rows have'} an empty Counterparty in the CSV.`
+      : 'Nothing in this selection.';
+    setTable('merch', ['Merchant', 'Total', 'Visits', 'Average'], []);
+    return;
+  }
+
   const totals = new Map();
   for (const row of rows) {
     if (!totals.has(row.cp)) totals.set(row.cp, { total: 0, n: 0 });
