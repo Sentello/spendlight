@@ -410,7 +410,10 @@ footer { color: var(--ink-3); font-size: 12px; margin-top: 28px; padding-top: 16
             </div>
           </div>
           <p class="card-sub">Top categories stacked; the rest grouped as Other.</p>
-          <div class="plot"><canvas id="c-stack" height="300"></canvas></div>
+          <div class="plot">
+            <canvas id="c-stack" height="300"></canvas>
+            <div class="empty" id="stack-empty" hidden></div>
+          </div>
           <div id="stack-table" hidden class="tbl-scroll"></div>
         </div>
         <div class="card">
@@ -422,7 +425,10 @@ footer { color: var(--ink-3); font-size: 12px; margin-top: 28px; padding-top: 16
             </div>
           </div>
           <p class="card-sub">Top 15 in the current selection. Click a bar to filter.</p>
-          <div class="plot"><canvas id="c-leaf" height="300"></canvas></div>
+          <div class="plot">
+            <canvas id="c-leaf" height="300"></canvas>
+            <div class="empty" id="leaf-empty" hidden></div>
+          </div>
           <div id="leaf-table" hidden class="tbl-scroll"></div>
         </div>
       </div>
@@ -523,7 +529,10 @@ footer { color: var(--ink-3); font-size: 12px; margin-top: 28px; padding-top: 16
           </div>
         </div>
         <p class="card-sub">Total spend per weekday in the current selection.</p>
-        <div class="plot"><canvas id="c-dow" height="240"></canvas></div>
+        <div class="plot">
+          <canvas id="c-dow" height="240"></canvas>
+          <div class="empty" id="dow-empty" hidden></div>
+        </div>
         <div id="dow-table" hidden class="tbl-scroll"></div>
       </div>
       <div class="card">
@@ -535,7 +544,10 @@ footer { color: var(--ink-3); font-size: 12px; margin-top: 28px; padding-top: 16
           </div>
         </div>
         <p class="card-sub">Does spending cluster around payday?</p>
-        <div class="plot"><canvas id="c-dom" height="240"></canvas></div>
+        <div class="plot">
+          <canvas id="c-dom" height="240"></canvas>
+          <div class="empty" id="dom-empty" hidden></div>
+        </div>
         <div id="dom-table" hidden class="tbl-scroll"></div>
       </div>
     </div>

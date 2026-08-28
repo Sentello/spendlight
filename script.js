@@ -267,6 +267,20 @@ function plotNote(key, message) {
   return blank;
 }
 
+/* spendRows() keeps one side of the ledger, so a selection can be full and
+ * still leave every spend-shaped chart with nothing to draw: the Show switch
+ * and the category or merchant filter are asking for opposite things. Naming
+ * that beats an axis with no bars on it. */
+function spendEmptyNote() {
+  const all = baseRows();
+  if (!all.length) return 'Nothing in this selection.';
+  const wantIncome = S.kind === 'income';
+  return `No ${wantIncome ? 'income' : 'spending'} in this selection — `
+    + `${all.length === 1 ? 'the one row here is' : `all ${group(String(all.length))} rows here are`} `
+    + `${wantIncome ? 'expenses' : 'income'}. `
+    + `Switch Show to ${wantIncome ? 'Expenses' : 'Income'}, or clear the filters.`;
+}
+
 /* The category, merchant, day and search filters narrow both sides of the
  * ledger at once. Income rows carry almost none of those values — salary has
  * no counterparty and sits in its own category — so any of them active means
@@ -713,6 +727,8 @@ function renderStack() {
     months.map((ym, i) => [prettyMonth(ym), ...series.map((s) => fmt(s.data[i])),
       fmt(sum(series, (s) => s.data[i]))]));
 
+  if (plotNote('stack', rows.length ? '' : spendEmptyNote())) return;
+
   draw('c-stack', {
     type: 'bar',
     data: { labels: months.map(prettyMonth), datasets: series },
@@ -742,6 +758,8 @@ function renderLeafBars() {
   const top = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15);
 
   setTable('leaf', ['Subcategory', 'Total'], top.map(([cat, v]) => [cat, fmt(v)]));
+
+  if (plotNote('leaf', top.length ? '' : spendEmptyNote())) return;
 
   // One series, one colour: bar length already encodes magnitude, so shading
   // it by size too would spend the colour channel on nothing.
@@ -1091,7 +1109,7 @@ function renderMerchants() {
   if (plotNote('merch', rows.length ? '' : (all.length
     ? `No merchant names in this selection. All ${group(String(all.length))} `
       + `${all.length === 1 ? 'row has' : 'rows have'} an empty Counterparty in the CSV.`
-    : 'Nothing in this selection.'))) {
+    : spendEmptyNote()))) {
     setTable('merch', ['Merchant', 'Total', 'Visits', 'Average'], []);
     return;
   }
@@ -1281,6 +1299,11 @@ function renderRhythm() {
   const dow = DOW_NAMES.map((_, i) => sum(rows.filter((r) => r.dow === i), (r) => r.amt));
   setTable('dow', ['Weekday', 'Spend', 'Transactions'],
     DOW_NAMES.map((name, i) => [name, fmt(dow[i]), String(rows.filter((r) => r.dow === i).length)]));
+
+  // Both rhythm plots read the same rows, so they blank together.
+  const rhythmNote = rows.length ? '' : spendEmptyNote();
+  plotNote('dom', rhythmNote);
+  if (plotNote('dow', rhythmNote)) return;
 
   draw('c-dow', {
     type: 'bar',
