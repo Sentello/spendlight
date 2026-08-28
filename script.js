@@ -6,6 +6,27 @@
  * filter never waits on Python.
  */
 
+// --- missing data guard ---------------------------------------------------
+
+/* data.js is generated, so it is legitimately absent on a fresh clone. Without
+ * this, the first line that touches ROWS throws a bare ReferenceError and the
+ * page renders blank, which tells the reader nothing. Stub the globals so the
+ * module can finish loading, then boot() explains what to run. (A bare `const`
+ * in data.js lives in the global lexical scope, not on window — assigning to
+ * window here is what makes the undeclared name resolve.) */
+const HAVE_DATA = typeof ROWS !== 'undefined'
+  && typeof META !== 'undefined'
+  && typeof CURRENCY !== 'undefined';
+
+if (!HAVE_DATA) {
+  window.ROWS = [];
+  window.META = { first: '', last: '', count: 0, source: '', generated: '' };
+  window.CURRENCY = { symbol: '', position: 'suffix', thousands: ' ', decimals: 0 };
+  window.CATEGORY_TREE = {};
+  window.RECURRING = [];
+  window.MERCHANTS = [];
+}
+
 // --- tokens ---------------------------------------------------------------
 
 const CSS = getComputedStyle(document.documentElement);
@@ -82,21 +103,32 @@ function inkOn(hex) {
  * is built once from the full dataset, so filtering never repaints a survivor.
  * Only the eight biggest parents get a hue — the palette has eight slots and
  * cycling past them would produce colours nobody can tell apart. The long tail
- * shares one neutral. */
+ * shares one neutral.
+ *
+ * Expense parents claim the slots first, before income-only ones. Salary
+ * outweighs every spending category by an order of magnitude, so ranking both
+ * kinds together would hand the leading hue to a category the default view
+ * never shows, and push a real spending category out of the palette. */
 const PARENT_COLOR = (() => {
-  const totals = new Map();
-  for (const row of ROWS) {
-    totals.set(row.parent, (totals.get(row.parent) || 0) + row.amt);
+  const rankBy = (kind) => {
+    const totals = new Map();
+    for (const row of ROWS) {
+      if (row.kind !== kind) continue;
+      totals.set(row.parent, (totals.get(row.parent) || 0) + row.amt);
+    }
+    return [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([parent]) => parent);
+  };
+  const order = rankBy('expense');
+  for (const parent of rankBy('income')) {
+    if (!order.includes(parent)) order.push(parent);
   }
-  const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1]);
   const map = new Map();
-  ranked.forEach(([parent], index) => {
+  order.forEach((parent, index) => {
     map.set(parent, index < SLOTS.length ? SLOTS[index] : OTHER);
   });
   return map;
 })();
 
-const NAMED_PARENTS = [...PARENT_COLOR.keys()].slice(0, SLOTS.length);
 const colorFor = (parent) => PARENT_COLOR.get(parent) || OTHER;
 
 // --- state ----------------------------------------------------------------
@@ -128,13 +160,26 @@ function baseRows() {
     (!q || (r.cp + ' ' + r.cat).toLowerCase().includes(q)));
 }
 
-/** The slice the charts draw, honouring the Expenses / Income / Both switch. */
+/** Every filtered row, both kinds — for the transaction table, where listing
+ *  income beside spending is exactly what "Both" should mean. */
 function viewRows() {
   const rows = baseRows();
   return S.kind === 'all' ? rows : rows.filter((r) => r.kind === S.kind);
 }
 
-const isSpend = () => S.kind !== 'income';
+/* One kind at a time, for the charts that read a total as an amount of money
+ * moving one way: the treemap, the category and merchant bars, the calendar
+ * and the weekday/day-of-month rhythm. Summing both kinds into one figure
+ * would count salary as spending and make "where the money goes" mostly
+ * salary. "Both" therefore keeps the expense side here; the Trends tab is
+ * where the two sides are actually compared. */
+function spendRows() {
+  const wanted = S.kind === 'income' ? 'income' : 'expense';
+  return baseRows().filter((r) => r.kind === wanted);
+}
+
+/** True when the spend-shaped charts are narrower than the kind switch says. */
+const spendNarrowed = () => S.kind === 'all';
 
 // --- tooltip (for the hand-drawn SVG charts) ------------------------------
 
@@ -421,7 +466,7 @@ function svgEl(name, attrs) {
 function renderTreemap() {
   const host = document.getElementById('tm-plot');
   const crumb = document.getElementById('tm-crumb');
-  const rows = viewRows();
+  const rows = spendRows();
 
   // Breadcrumb — how you get back out of a drill-down.
   crumb.textContent = '';
@@ -548,7 +593,7 @@ function renderTreemap() {
 
 function renderStack() {
   const months = monthsInView();
-  const rows = viewRows();
+  const rows = spendRows();
 
   // Eight hues is the ceiling; a ninth would be a colour nobody can name.
   // The tail becomes one honest "Other" series rather than a cycled hue.
@@ -599,7 +644,7 @@ function renderStack() {
 }
 
 function renderLeafBars() {
-  const rows = viewRows();
+  const rows = spendRows();
   const totals = new Map();
   for (const row of rows) totals.set(row.cat, (totals.get(row.cat) || 0) + row.amt);
   const top = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15);
@@ -762,7 +807,7 @@ function median(list) {
 
 function renderMoM() {
   const months = monthsInView();
-  const rows = viewRows();
+  const rows = spendRows();
   const parents = [...new Set(rows.map((r) => r.parent))];
   const totals = new Map(parents.map((p) => [p, sum(rows.filter((r) => r.parent === p), (r) => r.amt)]));
   parents.sort((a, b) => totals.get(b) - totals.get(a));
@@ -906,7 +951,7 @@ function renderRecurring() {
 }
 
 function renderMerchants() {
-  const rows = viewRows().filter((r) => r.cp);
+  const rows = spendRows().filter((r) => r.cp);
   const totals = new Map();
   for (const row of rows) {
     if (!totals.has(row.cp)) totals.set(row.cp, { total: 0, n: 0 });
@@ -955,7 +1000,7 @@ function renderMerchants() {
 
 function renderCalendar() {
   const host = document.getElementById('cal-plot');
-  const rows = viewRows();
+  const rows = spendRows();
   const perDay = new Map();
   for (const row of rows) {
     if (!perDay.has(row.date)) perDay.set(row.date, { total: 0, n: 0 });
@@ -1086,7 +1131,7 @@ function renderCalendar() {
 }
 
 function renderRhythm() {
-  const rows = viewRows();
+  const rows = spendRows();
 
   const dow = DOW_NAMES.map((_, i) => sum(rows.filter((r) => r.dow === i), (r) => r.amt));
   setTable('dow', ['Weekday', 'Spend', 'Transactions'],
@@ -1402,8 +1447,21 @@ function renderChips() {
 
 // ==========================================================================
 
+/* "Both" cannot be honoured by the spend-shaped charts without adding salary
+ * to spending, so say plainly what they are showing instead of quietly
+ * narrowing the slice. */
+function renderKindBanner() {
+  const banner = document.getElementById('kind-banner');
+  if (!spendNarrowed()) { banner.hidden = true; return; }
+  banner.hidden = false;
+  banner.textContent = S.tab === 'trend'
+    ? 'Showing both. The month-by-category table below counts expenses only; the two charts above compare both sides.'
+    : 'Showing both. These charts count expenses only — adding salary to spending would not be a meaningful total. Income is compared on the Trends tab.';
+}
+
 function render() {
   renderChips();
+  renderKindBanner();
   renderKpis();
   if (S.tab === 'cat') { renderTreemap(); renderStack(); renderLeafBars(); }
   else if (S.tab === 'trend') { renderFlow(); renderRate(); renderMoM(); }
@@ -1411,7 +1469,33 @@ function render() {
   else if (S.tab === 'cal') { renderCalendar(); renderRhythm(); renderTxns(); }
 }
 
+/* A fresh clone has no data.js. Say which command builds it, rather than
+ * leaving a blank page and a ReferenceError in the console. */
+function showMissingData() {
+  document.getElementById('hdr-sub').textContent = 'No data loaded';
+  document.querySelector('.filters').hidden = true;
+  document.querySelector('.tabs').hidden = true;
+  document.querySelectorAll('[role="tabpanel"]').forEach((panel) => { panel.hidden = true; });
+
+  const host = document.getElementById('kpis');
+  host.textContent = '';
+  host.className = '';
+  const box = document.createElement('div');
+  box.className = 'missing';
+  const title = document.createElement('h2');
+  title.textContent = 'data.js has not been generated yet';
+  const text = document.createElement('p');
+  text.textContent = 'Spendlight reads your transactions from data.js, which is built from a '
+    + 'My Expenses CSV export. Generate it and this page will fill in:';
+  const cmd = document.createElement('code');
+  cmd.textContent = 'python3 spendlight.py --serve';
+  box.append(title, text, cmd);
+  host.appendChild(box);
+  document.getElementById('foot').textContent = 'Spendlight — no data loaded.';
+}
+
 function boot() {
+  if (!HAVE_DATA) { showMissingData(); return; }
   document.getElementById('hdr-sub').textContent =
     `${prettyDate(META.first)} – ${prettyDate(META.last)} · ${group(String(META.count))} transactions`;
   document.getElementById('hdr-gen').textContent = 'Generated ' + META.generated;
