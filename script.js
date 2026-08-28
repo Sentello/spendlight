@@ -379,7 +379,8 @@ function renderKpis() {
   const income = sum(rows.filter((r) => r.kind === 'income'), (r) => r.amt);
   const net = income - spend;
   const monthList = monthsInView();
-  const months = monthsSpanned();
+  const days = daysInView();
+  const months = Math.max(days / (365.25 / 12), 1 / 31);
   const rate = income > 0 ? net / income : null;
   const stats = byMonth(rows);
   const spendSeries = monthList.map((ym) => (stats.get(ym) || {}).spend || 0);
@@ -389,11 +390,11 @@ function renderKpis() {
   const nMerchants = new Set(rows.map((r) => r.cp).filter(Boolean)).size;
 
   const tiles = [
-    { label: 'Total spent', raw: spend, format: fmt, note: `${months} month${months === 1 ? '' : 's'} in view`, hero: true, spark: spendSeries, sparkColor: ACCENT },
+    { label: 'Total spent', raw: spend, format: fmt, note: rangeNote(days), hero: true, spark: spendSeries, sparkColor: ACCENT },
     { label: 'Income', raw: income, format: fmt, note: income ? `${fmt(income / months)} a month` : 'none in range', spark: incomeSeries, sparkColor: SLOTS[0] },
     { label: 'Net saved', raw: net, format: fmt, note: 'income minus spending', tone: net >= 0 ? 'up' : 'down', spark: netSeries, sparkColor: net >= 0 ? GOOD : BAD },
     { label: 'Savings rate', raw: rate, format: (v) => (v === null || Number.isNaN(v) ? '—' : pct(v)), note: rate === null ? 'no income in range' : 'of income kept', tone: rate === null ? undefined : (rate >= 0 ? 'up' : 'down'), spark: monthList.map((_, i) => incomeSeries[i] > 0 ? netSeries[i] / incomeSeries[i] : null).filter((v) => v !== null), sparkColor: rate === null ? INK3 : (rate >= 0 ? GOOD : BAD) },
-    { label: 'Avg spend / month', raw: spend / months, format: fmt, note: `${fmt(spend / Math.max(1, daysInView()))} a day`, spark: spendSeries, sparkColor: SLOTS[0] },
+    { label: 'Avg spend / month', raw: spend / months, format: fmt, note: `${fmt(spend / Math.max(1, days))} a day`, spark: spendSeries, sparkColor: SLOTS[0] },
     { label: 'Transactions', raw: rows.length, format: (v) => group(String(Math.round(v))), note: `${nMerchants} merchant${nMerchants === 1 ? '' : 's'}`, spark: countSeries, sparkColor: SLOTS[0] },
   ];
 
@@ -437,17 +438,10 @@ function daysInView() {
   return Math.round((to - from) / 86400000) + 1;
 }
 
-function monthsSpanned() {
-  if (!S.from || !S.to) return 1;
-  let y = Number(S.from.slice(0, 4)), m = Number(S.from.slice(5, 7));
-  const y2 = Number(S.to.slice(0, 4)), m2 = Number(S.to.slice(5, 7));
-  let n = 0;
-  while (y < y2 || (y === y2 && m <= m2)) {
-    n += 1;
-    m += 1;
-    if (m > 12) { m = 1; y += 1; }
-  }
-  return n || 1;
+function rangeNote(days) {
+  if (days <= 92) return `${days} day${days === 1 ? '' : 's'} in view`;
+  const months = Math.max(1, Math.round(days / (365.25 / 12)));
+  return `${months} month${months === 1 ? '' : 's'} in view`;
 }
 
 // --- monthly aggregates ---------------------------------------------------
