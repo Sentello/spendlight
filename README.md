@@ -69,10 +69,10 @@ unusual month obvious.
 
 **Merchants & recurring** — top merchants by spend, and an automatic
 subscription detector. A counterparty is flagged as recurring when it bills
-across **≥ 2 distinct months**, **≤ 1.3 times per active month**, and with a
-**coefficient of variation under 0.25** — that is, roughly monthly, for roughly
-the same amount. The three conditions together separate subscriptions from
-shops you simply visit often. Tune the thresholds at the top of `spendlight.py`.
+across **≥ 2 distinct months**, **about once a month**, for **about the same
+amount**, was charged in the **latest or previous month** of the export, and
+fills at least **half the months** in that span (so an annual charge is not
+treated as monthly). Tune the thresholds at the top of `spendlight.py`.
 
 **Calendar & transactions** — a daily heatmap, spending rhythm by weekday and by
 day of month, and a sortable, searchable table of every row.

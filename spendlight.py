@@ -52,10 +52,14 @@ CURRENCIES = {
 # The export's date format follows the phone's locale, so never assume one.
 DATE_FORMATS = ["%m/%d/%y", "%d/%m/%y", "%Y-%m-%d", "%d.%m.%Y", "%m/%d/%Y", "%d/%m/%Y"]
 
-# Thresholds: many months, about once a month, about the same amount.
+# Thresholds: a few months, about once a month, about the same amount,
+# still charging recently, and without year-sized holes (an annual toll
+# is two months a year apart, not a monthly subscription).
 RECURRING_MIN_MONTHS = 2
 RECURRING_MAX_PER_MONTH = 1.3
 RECURRING_MAX_CV = 0.25
+RECURRING_MIN_COVERAGE = 0.5
+RECURRING_MAX_AGE_MONTHS = 1
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 UNCATEGORIZED = "Uncategorized"
@@ -248,16 +252,23 @@ def load(path):
 
 # --- Whole-dataset aggregates ----------------------------------------------
 
+def _months_between(start_ym, end_ym):
+    y1, m1 = int(start_ym[:4]), int(start_ym[5:7])
+    y2, m2 = int(end_ym[:4]), int(end_ym[5:7])
+    return (y2 - y1) * 12 + (m2 - m1)
+
+
 def find_recurring(records):
     """Counterparties that look like subscriptions, newest charge first.
 
-    Filter-independent: whether Spotify is a subscription does not change when
-    you zoom the dashboard into one month, so it is settled once, here.
+    Filter-independent: whether a merchant is a subscription does not change
+    when you zoom the dashboard into one month, so it is settled once, here.
     """
     charges = defaultdict(list)
     for rec in records:
         if rec["kind"] == "expense" and rec["cp"]:
             charges[rec["cp"]].append(rec)
+    last_ym = max(r["ym"] for r in records)
 
     found = []
     for merchant, rows in charges.items():
@@ -265,6 +276,11 @@ def find_recurring(records):
         if len(months) < RECURRING_MIN_MONTHS:
             continue
         if len(rows) / len(months) > RECURRING_MAX_PER_MONTH:
+            continue
+        span = _months_between(min(months), max(months)) + 1
+        if len(months) / span < RECURRING_MIN_COVERAGE:
+            continue
+        if _months_between(max(months), last_ym) > RECURRING_MAX_AGE_MONTHS:
             continue
         amounts = [r["amt"] for r in rows]
         mean = statistics.fmean(amounts)
