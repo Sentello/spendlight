@@ -21,7 +21,7 @@ const HAVE_DATA = typeof ROWS !== 'undefined'
 if (!HAVE_DATA) {
   window.ROWS = [];
   window.META = { first: '', last: '', count: 0, source: '', generated: '' };
-  window.CURRENCY = { symbol: '', position: 'suffix', thousands: ' ', decimals: 0 };
+  window.CURRENCY = { symbol: '', position: 'suffix', thousands: ' ', decimal: ',', decimals: 0 };
   window.CATEGORY_TREE = {};
   window.RECURRING = [];
 }
@@ -52,8 +52,9 @@ function group(intPart) {
 
 function fmt(n, decimals) {
   const dec = decimals === undefined ? CURRENCY.decimals : decimals;
+  const mark = CURRENCY.decimal || '.';
   const parts = Math.abs(n).toFixed(dec).split('.');
-  const body = group(parts[0]) + (parts[1] ? '.' + parts[1] : '');
+  const body = group(parts[0]) + (parts[1] ? mark + parts[1] : '');
   const sign = n < 0 ? '−' : '';
   return CURRENCY.position === 'prefix'
     ? sign + CURRENCY.symbol + body

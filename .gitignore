@@ -8,6 +8,9 @@
 # transaction list as JSON. Rebuild it any time with `python3 spendlight.py`.
 data.js
 
+# Your display currency (python3 spendlight.py --currency PLN). Not a source edit.
+spendlight.local.json
+
 # Screenshots of the dashboard show real balances and salary figures.
 # Keep the folder, but commit an image only after checking what is in it.
 screenshots/

@@ -12,6 +12,7 @@ Standard library only — the system Python is externally managed (PEP 668) and
     python3 spendlight.py                    # newest Budget Book-*.csv nearby
     python3 spendlight.py path/to/export.csv # explicit file
     python3 spendlight.py --serve            # regenerate, serve, open browser
+    python3 spendlight.py --currency PLN     # zł; remembered in spendlight.local.json
 """
 
 import argparse
@@ -29,13 +30,23 @@ from datetime import datetime
 
 # --- Configuration ---------------------------------------------------------
 
-# Change `symbol` to "€", "$", "£" … and the whole dashboard follows; the
-# JavaScript never hardcodes a currency.
-CURRENCY = {
-    "symbol": "€",
-    "position": "prefix",   # "prefix" -> "€1 234"; "suffix" -> "1 234 €"
-    "thousands": " ",  # non-breaking space
-    "decimals": 0,
+# Display currency is not a source edit. Pass --currency CZK (or PLN, EUR, …)
+# once; it is remembered in spendlight.local.json, which is gitignored.
+NBSP = "\u00a0"
+DEFAULT_CURRENCY = "CZK"
+CURRENCIES = {
+    "CZK": {"symbol": "Kč", "position": "suffix", "thousands": NBSP, "decimal": ",", "decimals": 0},
+    "PLN": {"symbol": "zł", "position": "suffix", "thousands": NBSP, "decimal": ",", "decimals": 2},
+    "EUR": {"symbol": "€", "position": "suffix", "thousands": NBSP, "decimal": ",", "decimals": 2},
+    "USD": {"symbol": "$", "position": "prefix", "thousands": ",", "decimal": ".", "decimals": 2},
+    "GBP": {"symbol": "£", "position": "prefix", "thousands": ",", "decimal": ".", "decimals": 2},
+    "HUF": {"symbol": "Ft", "position": "suffix", "thousands": NBSP, "decimal": ",", "decimals": 0},
+    "RON": {"symbol": "lei", "position": "suffix", "thousands": NBSP, "decimal": ",", "decimals": 2},
+    "BGN": {"symbol": "лв", "position": "suffix", "thousands": NBSP, "decimal": ",", "decimals": 2},
+    "CHF": {"symbol": "CHF", "position": "prefix", "thousands": "'", "decimal": ".", "decimals": 2},
+    "SEK": {"symbol": "kr", "position": "suffix", "thousands": NBSP, "decimal": ",", "decimals": 2},
+    "NOK": {"symbol": "kr", "position": "suffix", "thousands": NBSP, "decimal": ",", "decimals": 2},
+    "DKK": {"symbol": "kr", "position": "suffix", "thousands": NBSP, "decimal": ",", "decimals": 2},
 }
 
 # The export's date format follows the phone's locale, so never assume one.
@@ -48,6 +59,66 @@ RECURRING_MAX_CV = 0.25
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 UNCATEGORIZED = "Uncategorized"
+LOCAL_CONFIG = os.path.join(SCRIPT_DIR, "spendlight.local.json")
+
+
+def _currency_codes():
+    return ", ".join(sorted(CURRENCIES))
+
+
+def _read_local():
+    if not os.path.isfile(LOCAL_CONFIG):
+        return {}
+    try:
+        with open(LOCAL_CONFIG, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        sys.exit(f"Could not read {LOCAL_CONFIG}: {exc}")
+    if not isinstance(data, dict):
+        sys.exit(f"{LOCAL_CONFIG} must be a JSON object.")
+    return data
+
+
+def _write_local(data):
+    with open(LOCAL_CONFIG, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+
+
+def resolve_currency(cli_code):
+    """CLI flag, then spendlight.local.json, then CZK. Never a source edit."""
+    local = _read_local()
+    if cli_code:
+        code = cli_code.strip().upper()
+        if code not in CURRENCIES:
+            sys.exit(
+                f"Unknown currency {cli_code!r}. Known codes: {_currency_codes()}.\n"
+                f"For anything else, put symbol/position/thousands/decimal/decimals "
+                f"in {os.path.basename(LOCAL_CONFIG)}."
+            )
+        local = {"currency": code}
+        _write_local(local)
+    if local.get("symbol"):
+        spec = {
+            "symbol": str(local["symbol"]),
+            "position": local.get("position") or "suffix",
+            "thousands": local.get("thousands") if local.get("thousands") is not None else NBSP,
+            "decimal": local.get("decimal") or ",",
+            "decimals": int(local.get("decimals", 2)),
+            "code": (local.get("currency") or "custom").upper(),
+        }
+        if spec["position"] not in ("prefix", "suffix"):
+            sys.exit("currency position must be 'prefix' or 'suffix'.")
+        return spec
+    code = (local.get("currency") or DEFAULT_CURRENCY).strip().upper()
+    if code not in CURRENCIES:
+        sys.exit(
+            f"{os.path.basename(LOCAL_CONFIG)} has unknown currency {code!r}. "
+            f"Known codes: {_currency_codes()}."
+        )
+    spec = dict(CURRENCIES[code])
+    spec["code"] = code
+    return spec
 
 
 # --- Input -----------------------------------------------------------------
@@ -227,7 +298,7 @@ def category_tree(records):
     return {parent: sorted(children) for parent, children in sorted(tree.items())}
 
 
-def summarise(records, tree, recurring, path, date_fmt, splits):
+def summarise(records, tree, recurring, path, date_fmt, splits, currency):
     """Print the stdout summary used to verify the numbers did not drift."""
     expense = sum(r["amt"] for r in records if r["kind"] == "expense")
     income = sum(r["amt"] for r in records if r["kind"] == "income")
@@ -247,13 +318,14 @@ def summarise(records, tree, recurring, path, date_fmt, splits):
     print(f"  uncategorized      {uncategorized} rows")
     if splits:
         print(f"  split rows         {splits} (column ignored; each line is one record)")
+    print(f"  currency           {currency['code']} ({currency['symbol']})")
     print(f"  recurring detected {len(recurring)}: "
           f"{', '.join(item['cp'] for item in recurring[:8])}")
 
 
 # --- Output ----------------------------------------------------------------
 
-def write_data_js(records, tree, recurring, path, out_path):
+def write_data_js(records, tree, recurring, path, out_path, currency):
     dump = functools.partial(json.dumps, ensure_ascii=False)
     meta = {
         "source": os.path.basename(path),
@@ -266,7 +338,7 @@ def write_data_js(records, tree, recurring, path, out_path):
         handle.write(
             "// data.js — generated by spendlight.py, do not edit by hand.\n"
             f"const META = {dump(meta)};\n"
-            f"const CURRENCY = {dump(CURRENCY)};\n"
+            f"const CURRENCY = {dump(currency)};\n"
             f"const CATEGORY_TREE = {dump(tree)};\n"
             f"const RECURRING = {dump(recurring)};\n"
             f"const ROWS = {dump(records)};\n"
@@ -294,7 +366,12 @@ def main():
     parser.add_argument("--serve", action="store_true",
                         help="serve the dashboard and open it in a browser")
     parser.add_argument("--port", type=int, default=8000, help="port for --serve")
+    parser.add_argument(
+        "--currency", metavar="CODE",
+        help="display currency (CZK, PLN, EUR, USD, …). Saved in spendlight.local.json, not in git.")
     args = parser.parse_args()
+
+    currency = resolve_currency(args.currency)
 
     path = args.csv or discover_csv()
     if not os.path.exists(path):
@@ -305,8 +382,8 @@ def main():
     recurring = find_recurring(records)
 
     out_path = os.path.join(SCRIPT_DIR, "data.js")
-    write_data_js(records, tree, recurring, path, out_path)
-    summarise(records, tree, recurring, path, date_fmt, splits)
+    write_data_js(records, tree, recurring, path, out_path, currency)
+    summarise(records, tree, recurring, path, date_fmt, splits, currency)
     print(f"  wrote              {out_path}")
 
     if args.serve:
