@@ -25,26 +25,23 @@ import statistics
 import sys
 import webbrowser
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime
 
 # --- Configuration ---------------------------------------------------------
 
-# Change `symbol` to "лв", "€", "$" … and the whole dashboard follows; the
+# Change `symbol` to "€", "$", "£" … and the whole dashboard follows; the
 # JavaScript never hardcodes a currency.
 CURRENCY = {
-    "symbol": "Kč",
-    "position": "suffix",   # "suffix" -> "1 234 Kč"; "prefix" -> "€1 234"
-    "thousands": " ",  # non-breaking space, Czech convention
-    "decimals": 0,          # dashboards read better without haléře
+    "symbol": "€",
+    "position": "prefix",   # "prefix" -> "€1 234"; "suffix" -> "1 234 €"
+    "thousands": " ",  # non-breaking space
+    "decimals": 0,
 }
 
 # The export's date format follows the phone's locale, so never assume one.
 DATE_FORMATS = ["%m/%d/%y", "%d/%m/%y", "%Y-%m-%d", "%d.%m.%Y", "%m/%d/%Y", "%d/%m/%Y"]
 
-# A counterparty is a subscription when it bills across many months, about once
-# a month, for about the same amount. Tuned against the reference export: it
-# catches Revolut/Grok/Vps/Chatgpt and rejects Lidl/Albert, which recur just as
-# often but at wildly varying amounts and several times a month.
+# Thresholds: many months, about once a month, about the same amount.
 RECURRING_MIN_MONTHS = 4
 RECURRING_MAX_PER_MONTH = 1.3
 RECURRING_MAX_CV = 0.25
@@ -73,20 +70,33 @@ def discover_csv():
     return max(candidates, key=lambda p: (os.path.basename(p), os.path.getmtime(p)))
 
 
+def _fits_date_format(fmt, raw_rows):
+    try:
+        for row in raw_rows:
+            datetime.strptime(row["Date"], fmt)
+        return True
+    except (ValueError, TypeError, KeyError):
+        return False
+
+
 def sniff_date_format(raw_rows):
     """Pick the one format that parses every date in the file.
 
-    Guessing per-row would silently swap day and month on ambiguous dates and
-    scramble every chart, so require a format that works for the whole file.
+    Guessing per-row would silently swap day and month. If two formats both
+    fit (every day is 1–12), refuse rather than pick MM/DD first.
     """
-    for fmt in DATE_FORMATS:
-        try:
-            for row in raw_rows:
-                datetime.strptime(row["Date"], fmt)
-            return fmt
-        except (ValueError, TypeError):
-            continue
-    sample = [r["Date"] for r in raw_rows[:5]]
+    fits = [fmt for fmt in DATE_FORMATS if _fits_date_format(fmt, raw_rows)]
+    sample = [r.get("Date") for r in raw_rows[:5]]
+    if len(fits) == 1:
+        return fits[0]
+    if len(fits) > 1:
+        sys.exit(
+            "Date column matches more than one format; refusing to guess "
+            "(a day/month swap would scramble every chart).\n"
+            f"  Matching formats: {fits}\n"
+            f"  First dates seen: {sample}\n"
+            "Re-export as ISO YYYY-MM-DD, or include a day > 12 so the locale is obvious."
+        )
     sys.exit(
         f"Could not parse the Date column with any known format.\n"
         f"  First dates seen: {sample}\n"
@@ -95,11 +105,24 @@ def sniff_date_format(raw_rows):
 
 
 def money(value):
-    """My Expenses writes '' for the unused side of a transaction."""
-    text = (value or "").strip()
+    """Parse an amount. The unused side is '' or '0'."""
+    text = (value or "").strip().replace("\u00a0", "").replace(" ", "")
     if not text:
         return 0.0
-    return float(text.replace(",", "."))
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "," in text:
+        whole, _, frac = text.partition(",")
+        text = (whole + "." + frac) if frac and len(frac) <= 2 and "," not in whole else text.replace(",", "")
+    elif text.count(".") > 1:
+        text = text.replace(".", "")
+    try:
+        return float(text)
+    except ValueError:
+        raise ValueError(f"could not parse amount {value!r}") from None
 
 
 def split_category(raw):
@@ -120,16 +143,24 @@ def load(path):
         sys.exit(f"{path} contains no rows.")
 
     date_fmt = sniff_date_format(raw_rows)
+    splits = sum(1 for row in raw_rows if (row.get("Split transaction") or "").strip())
     records = []
     for index, row in enumerate(raw_rows):
         when = datetime.strptime(row["Date"], date_fmt)
-        income, expense = money(row.get("Income")), money(row.get("Expense"))
+        try:
+            income, expense = money(row.get("Income")), money(row.get("Expense"))
+        except ValueError as exc:
+            sys.exit(f"Row {index + 2}: {exc}")
+        if income > 0 and expense > 0:
+            sys.exit(
+                f"Row {index + 2} has both Income ({income}) and Expense ({expense}). "
+                "Spendlight expects one side per row."
+            )
         parent, child = split_category(row.get("Category"))
         is_income = income > 0
         records.append({
             "i": index,
             "date": when.strftime("%Y-%m-%d"),
-            "ts": int(when.replace(tzinfo=timezone.utc).timestamp() * 1000),
             "cp": (row.get("Counterparty") or "").strip(),
             "amt": income if is_income else expense,
             "kind": "income" if is_income else "expense",
@@ -140,8 +171,8 @@ def load(path):
             "dow": when.weekday(),      # 0 = Monday
             "dom": when.day,
         })
-    records.sort(key=lambda r: (r["ts"], r["i"]))
-    return records, date_fmt
+    records.sort(key=lambda r: (r["date"], r["i"]))
+    return records, date_fmt, splits
 
 
 # --- Whole-dataset aggregates ----------------------------------------------
@@ -196,7 +227,7 @@ def category_tree(records):
     return {parent: sorted(children) for parent, children in sorted(tree.items())}
 
 
-def summarise(records, tree, recurring, path, date_fmt):
+def summarise(records, tree, recurring, path, date_fmt, splits):
     """Print the stdout summary used to verify the numbers did not drift."""
     expense = sum(r["amt"] for r in records if r["kind"] == "expense")
     income = sum(r["amt"] for r in records if r["kind"] == "income")
@@ -214,6 +245,8 @@ def summarise(records, tree, recurring, path, date_fmt):
     print(f"  total income       {income:,.2f}")
     print(f"  net saved          {income - expense:,.2f}  ({rate:.1f}%)")
     print(f"  uncategorized      {uncategorized} rows")
+    if splits:
+        print(f"  split rows         {splits} (column ignored; each line is one record)")
     print(f"  recurring detected {len(recurring)}: "
           f"{', '.join(item['cp'] for item in recurring[:8])}")
 
@@ -222,7 +255,6 @@ def summarise(records, tree, recurring, path, date_fmt):
 
 def write_data_js(records, tree, recurring, path, out_path):
     dump = functools.partial(json.dumps, ensure_ascii=False)
-    merchants = sorted({r["cp"] for r in records if r["cp"]})
     meta = {
         "source": os.path.basename(path),
         "generated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -236,7 +268,6 @@ def write_data_js(records, tree, recurring, path, out_path):
             f"const META = {dump(meta)};\n"
             f"const CURRENCY = {dump(CURRENCY)};\n"
             f"const CATEGORY_TREE = {dump(tree)};\n"
-            f"const MERCHANTS = {dump(merchants)};\n"
             f"const RECURRING = {dump(recurring)};\n"
             f"const ROWS = {dump(records)};\n"
         )
@@ -269,13 +300,13 @@ def main():
     if not os.path.exists(path):
         sys.exit(f"No such file: {path}")
 
-    records, date_fmt = load(path)
+    records, date_fmt, splits = load(path)
     tree = category_tree(records)
     recurring = find_recurring(records)
 
     out_path = os.path.join(SCRIPT_DIR, "data.js")
     write_data_js(records, tree, recurring, path, out_path)
-    summarise(records, tree, recurring, path, date_fmt)
+    summarise(records, tree, recurring, path, date_fmt, splits)
     print(f"  wrote              {out_path}")
 
     if args.serve:

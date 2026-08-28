@@ -1,9 +1,9 @@
 /* Spendlight dashboard.
  *
  * data.js supplies ROWS (every transaction), plus the whole-dataset facts that
- * do not depend on the current filter: CATEGORY_TREE, RECURRING, MERCHANTS,
- * CURRENCY, META. Everything else is derived here, in the browser, so moving a
- * filter never waits on Python.
+ * do not depend on the current filter: CATEGORY_TREE, RECURRING, CURRENCY, META.
+ * Everything else is derived here, in the browser, so moving a filter never
+ * waits on Python.
  */
 
 // --- missing data guard ---------------------------------------------------
@@ -24,7 +24,6 @@ if (!HAVE_DATA) {
   window.CURRENCY = { symbol: '', position: 'suffix', thousands: ' ', decimals: 0 };
   window.CATEGORY_TREE = {};
   window.RECURRING = [];
-  window.MERCHANTS = [];
 }
 
 // --- tokens ---------------------------------------------------------------
@@ -379,7 +378,7 @@ function renderKpis() {
   const income = sum(rows.filter((r) => r.kind === 'income'), (r) => r.amt);
   const net = income - spend;
   const monthList = monthsInView();
-  const months = monthList.length || 1;
+  const months = monthsSpanned();
   const rate = income > 0 ? net / income : null;
   const stats = byMonth(rows);
   const spendSeries = monthList.map((ym) => (stats.get(ym) || {}).spend || 0);
@@ -433,8 +432,21 @@ function renderKpis() {
 }
 
 function daysInView() {
-  const from = new Date(S.from), to = new Date(S.to);
+  const from = new Date(S.from + 'T00:00:00'), to = new Date(S.to + 'T00:00:00');
   return Math.round((to - from) / 86400000) + 1;
+}
+
+function monthsSpanned() {
+  if (!S.from || !S.to) return 1;
+  let y = Number(S.from.slice(0, 4)), m = Number(S.from.slice(5, 7));
+  const y2 = Number(S.to.slice(0, 4)), m2 = Number(S.to.slice(5, 7));
+  let n = 0;
+  while (y < y2 || (y === y2 && m <= m2)) {
+    n += 1;
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  return n || 1;
 }
 
 // --- monthly aggregates ---------------------------------------------------
@@ -903,7 +915,9 @@ function renderMoM() {
     link.tabIndex = 0;
     const pick = () => { S.parent = parent; S.cat = ''; S.drill = null; syncControls(); render(); };
     link.addEventListener('click', pick);
-    link.addEventListener('keydown', (e) => { if (e.key === 'Enter') pick(); });
+    link.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); }
+    });
     const swatch = document.createElement('i');
     swatch.style.cssText = `display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:8px;background:${colorFor(parent)}`;
     nameCell.append(swatch, link);
@@ -996,7 +1010,9 @@ function renderRecurring() {
     name.tabIndex = 0;
     const pick = () => { S.merchant = item.cp; syncControls(); render(); };
     name.addEventListener('click', pick);
-    name.addEventListener('keydown', (e) => { if (e.key === 'Enter') pick(); });
+    name.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); }
+    });
 
     const cat = document.createElement('div');
     cat.className = 'cat';
@@ -1155,22 +1171,14 @@ function renderCalendar() {
         class: inRange ? 'cell' : '',
       });
       if (inRange) {
-        rect.setAttribute('tabindex', '0');
-        rect.setAttribute('role', 'button');
-        rect.setAttribute('aria-label',
-          `${prettyDate(iso)}: ${stat ? fmt(stat.total) : 'nothing'}`);
         const onEnter = (event) => showTip(event, prettyDate(iso), stat
           ? [{ color: fill, value: fmt(stat.total), name: `${stat.n} transaction${stat.n === 1 ? '' : 's'}` }]
           : [{ value: 'Nothing spent' }]);
         rect.addEventListener('pointerenter', onEnter);
         rect.addEventListener('pointermove', moveTip);
         rect.addEventListener('pointerleave', hideTip);
-        rect.addEventListener('blur', hideTip);
         const activate = () => { hideTip(); S.day = S.day === iso ? '' : iso; syncControls(); render(); };
         rect.addEventListener('click', activate);
-        rect.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
-        });
         if (S.day === iso) {
           rect.setAttribute('stroke', INK);
           rect.setAttribute('stroke-width', '2');
@@ -1338,38 +1346,33 @@ const PRESETS = [
   { id: '30d', label: 'Last 30 days' },
 ];
 
-function applyPreset(id) {
+function rangeFromPreset(id) {
   const last = new Date(META.last + 'T00:00:00');
-  const iso = isoLocal;
-  if (id === 'all') { S.from = META.first; S.to = META.last; }
-  else if (id === 'ytd') { S.from = META.last.slice(0, 4) + '-01-01'; S.to = META.last; }
-  else {
-    const back = { '12m': 365, '90d': 90, '30d': 30 }[id];
-    const from = new Date(last);
-    from.setDate(from.getDate() - back + 1);
-    S.from = iso(from) < META.first ? META.first : iso(from);
-    S.to = META.last;
+  if (id === 'all') return { from: META.first, to: META.last };
+  if (id === 'ytd') return { from: META.last.slice(0, 4) + '-01-01', to: META.last };
+  const from = new Date(last);
+  if (id === '12m') {
+    from.setMonth(from.getMonth() - 12);
+    from.setDate(from.getDate() + 1);
+  } else {
+    from.setDate(from.getDate() - ({ '90d': 90, '30d': 30 }[id]) + 1);
   }
+  const iso = isoLocal(from);
+  return { from: iso < META.first ? META.first : iso, to: META.last };
+}
+
+function applyPreset(id) {
+  const range = rangeFromPreset(id);
+  S.from = range.from;
+  S.to = range.to;
   syncControls();
   render();
 }
 
 function activePreset() {
   for (const preset of PRESETS) {
-    const before = { from: S.from, to: S.to };
-    // cheap probe: recompute the preset's dates without touching state
-    const last = new Date(META.last + 'T00:00:00');
-    const iso = isoLocal;
-    let from, to = META.last;
-    if (preset.id === 'all') { from = META.first; }
-    else if (preset.id === 'ytd') { from = META.last.slice(0, 4) + '-01-01'; }
-    else {
-      const back = { '12m': 365, '90d': 90, '30d': 30 }[preset.id];
-      const d = new Date(last);
-      d.setDate(d.getDate() - back + 1);
-      from = iso(d) < META.first ? META.first : iso(d);
-    }
-    if (before.from === from && before.to === to) return preset.id;
+    const range = rangeFromPreset(preset.id);
+    if (S.from === range.from && S.to === range.to) return preset.id;
   }
   return null;
 }
@@ -1448,6 +1451,19 @@ function buildFilterUI() {
   document.querySelectorAll('[role="tab"]').forEach((tab) => {
     tab.addEventListener('click', () => selectTab(tab.id.replace('tab-', '')));
   });
+  document.querySelector('[role="tablist"]').addEventListener('keydown', (e) => {
+    const tabs = [...document.querySelectorAll('[role="tab"]')];
+    const i = tabs.findIndex((t) => t.getAttribute('aria-selected') === 'true');
+    let next = i;
+    if (e.key === 'ArrowRight') next = (i + 1) % tabs.length;
+    else if (e.key === 'ArrowLeft') next = (i - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = tabs.length - 1;
+    else return;
+    e.preventDefault();
+    selectTab(tabs[next].id.replace('tab-', ''));
+    tabs[next].focus();
+  });
   window.addEventListener('hashchange', () => selectTab(location.hash.slice(1) || 'cat'));
 
   window.addEventListener('resize', () => {
@@ -1466,6 +1482,7 @@ function selectTab(name) {
   document.querySelectorAll('[role="tab"]').forEach((tab) => {
     const on = tab.id === 'tab-' + name;
     tab.setAttribute('aria-selected', String(on));
+    tab.tabIndex = on ? 0 : -1;
     document.getElementById(tab.getAttribute('aria-controls')).hidden = !on;
   });
   if (location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);

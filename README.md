@@ -25,8 +25,9 @@ environment and pushes you into a virtualenv. Spendlight avoids that entirely:
 it imports only `csv`, `json`, `argparse`, `statistics`, `http.server`,
 `webbrowser`, `glob`, `functools`, `datetime`, `os` and `sys`.
 
-The dashboard loads Chart.js from a CDN in the browser, so viewing it needs an
-internet connection on first load; generating `data.js` works fully offline.
+The dashboard loads Chart.js from a CDN (pinned with a Subresource Integrity
+hash) in the browser, so viewing it needs an internet connection on first load;
+generating `data.js` works fully offline.
 
 ## Run it
 
@@ -91,37 +92,12 @@ One dict at the top of `spendlight.py`; the JavaScript never hardcodes a symbol.
 
 ```python
 CURRENCY = {
-    "symbol": "Kč",        # "лв", "€", "$" …
-    "position": "suffix",  # "suffix" -> "1 234 Kč"; "prefix" -> "€1 234"
+    "symbol": "€",         # "$", "£" …
+    "position": "prefix",  # "prefix" -> "€1 234"; "suffix" -> "1 234 €"
     "thousands": " ", # non-breaking space
     "decimals": 0,
 }
 ```
-
-## Privacy — read before pushing to GitHub
-
-This repository is *code*; your money is not meant to be in it. Two files hold
-everything about your finances and both are already in `.gitignore`:
-
-| File | Why it must stay out |
-|---|---|
-| `Budget Book-*.csv` | The raw export — every transaction, merchant and amount. |
-| `data.js` | Generated from it, and just as revealing: the full transaction list as JSON, plus your salary. |
-
-`.gitignore` also excludes `*.png` / `*.jpg` by default, because **a screenshot
-of the dashboard shows your real salary, balances and merchants**. If you want a
-screenshot in the README, generate one from invented data first and commit it as
-`docs/demo-*.png`, which is the one image pattern left un-ignored.
-
-Before your first push, confirm nothing sensitive is staged:
-
-```bash
-git status --short          # neither the CSV nor data.js should appear
-git ls-files | grep -Ei 'csv|data\.js'   # should print nothing
-```
-
-Anything committed once stays in the git history even if you delete it later, so
-it is worth checking before the first push rather than after.
 
 ## Files
 
@@ -144,6 +120,8 @@ empty, so nothing is built for them. Rows with no category are bucketed as
 
 The date format follows the exporting phone's locale, so Spendlight sniffs it:
 it tries each known format against **every** row and keeps the one that parses
-them all, failing loudly rather than risking a silent day/month swap.
+them all. If two formats both fit (every day is 1–12), it refuses to guess
+rather than risk a silent day/month swap. Re-export as ISO `YYYY-MM-DD`, or
+include a day greater than 12.
 
 Spendlight is strictly read-only. It never writes back to the phone.

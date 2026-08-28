@@ -4,7 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Spendlight</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
+        integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4"
+        crossorigin="anonymous"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -374,10 +376,10 @@ footer { color: var(--ink-3); font-size: 12px; margin-top: 28px; padding-top: 16
   <div class="kpis" id="kpis"></div>
 
   <div class="tabs" role="tablist">
-    <button role="tab" id="tab-cat" aria-controls="p-cat" aria-selected="true">Categories</button>
-    <button role="tab" id="tab-trend" aria-controls="p-trend" aria-selected="false">Trends</button>
-    <button role="tab" id="tab-merch" aria-controls="p-merch" aria-selected="false">Merchants &amp; recurring</button>
-    <button role="tab" id="tab-cal" aria-controls="p-cal" aria-selected="false">Calendar &amp; transactions</button>
+    <button role="tab" id="tab-cat" aria-controls="p-cat" aria-selected="true" tabindex="0">Categories</button>
+    <button role="tab" id="tab-trend" aria-controls="p-trend" aria-selected="false" tabindex="-1">Trends</button>
+    <button role="tab" id="tab-merch" aria-controls="p-merch" aria-selected="false" tabindex="-1">Merchants &amp; recurring</button>
+    <button role="tab" id="tab-cal" aria-controls="p-cal" aria-selected="false" tabindex="-1">Calendar &amp; transactions</button>
   </div>
 
   <!-- ============ CATEGORIES ============ -->
