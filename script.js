@@ -39,6 +39,7 @@ const EMPTY_CELL = tok('--q0');
 const INK = tok('--ink'), INK2 = tok('--ink-2'), INK3 = tok('--ink-3');
 const GRID = tok('--grid'), AXIS = tok('--axis'), SURFACE = tok('--surface');
 const GOOD = tok('--good'), BAD = tok('--critical');
+const ACCENT = tok('--accent');
 
 const DOW_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -329,47 +330,73 @@ function paintTable(key) {
   host.appendChild(table);
 }
 
-document.querySelectorAll('.tbtn[data-table]').forEach((button) => {
-  button.addEventListener('click', () => {
-    const key = button.dataset.table;
-    const host = document.getElementById(key + '-table');
-    const card = button.closest('.card');
-    const plot = card.querySelector('.plot, #tm-plot, #cal-plot');
-    const showTable = host.hidden;
-    host.hidden = !showTable;
-    if (plot) plot.hidden = showTable;
-    const crumb = card.querySelector('.crumb');
-    if (crumb) crumb.hidden = showTable;
-    button.setAttribute('aria-pressed', String(showTable));
-    button.textContent = showTable ? 'Chart' : 'Table';
-    if (showTable) paintTable(key);
+document.querySelectorAll('.tseg').forEach((seg) => {
+  seg.querySelectorAll('button').forEach((button) => {
+    button.addEventListener('click', () => {
+      const key = button.dataset.table;
+      const showTable = button.dataset.view === 'table';
+      const host = document.getElementById(key + '-table');
+      const card = button.closest('.card');
+      const plot = card.querySelector('.plot, #tm-plot, #cal-plot');
+      host.hidden = !showTable;
+      if (plot) plot.hidden = showTable;
+      const crumb = card.querySelector('.crumb');
+      if (crumb) crumb.hidden = showTable;
+      seg.querySelectorAll('button').forEach((b) =>
+        b.setAttribute('aria-pressed', String(b.dataset.view === button.dataset.view)));
+      if (showTable) paintTable(key);
+    });
   });
 });
 
 // --- KPI row --------------------------------------------------------------
+
+let kpiIntro = true;
+
+function reduceMotion() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function tweenText(el, from, to, formatFn, ms) {
+  if (reduceMotion() || from === to) { el.textContent = formatFn(to); return; }
+  const start = performance.now();
+  const tick = (now) => {
+    const t = Math.min(1, (now - start) / ms);
+    const eased = 1 - Math.pow(1 - t, 3);
+    el.textContent = formatFn(from + (to - from) * eased);
+    if (t < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
 
 function renderKpis() {
   const rows = baseRows();
   const spend = sum(rows.filter((r) => r.kind === 'expense'), (r) => r.amt);
   const income = sum(rows.filter((r) => r.kind === 'income'), (r) => r.amt);
   const net = income - spend;
-  const months = new Set(rows.map((r) => r.ym)).size || 1;
+  const monthList = monthsInView();
+  const months = monthList.length || 1;
   const rate = income > 0 ? net / income : null;
+  const stats = byMonth(rows);
+  const spendSeries = monthList.map((ym) => (stats.get(ym) || {}).spend || 0);
+  const incomeSeries = monthList.map((ym) => (stats.get(ym) || {}).income || 0);
+  const netSeries = monthList.map((_, i) => incomeSeries[i] - spendSeries[i]);
+  const countSeries = monthList.map((ym) => (stats.get(ym) || {}).n || 0);
+  const nMerchants = new Set(rows.map((r) => r.cp).filter(Boolean)).size;
 
   const tiles = [
-    { label: 'Total spent', value: fmt(spend), note: `${months} month${months === 1 ? '' : 's'} in view`, hero: true },
-    { label: 'Income', value: fmt(income), note: income ? `${fmt(income / months)} a month` : 'none in range' },
-    { label: 'Net saved', value: fmt(net), note: 'income minus spending', tone: net >= 0 ? 'up' : 'down' },
-    { label: 'Savings rate', value: rate === null ? '—' : pct(rate), note: rate === null ? 'no income in range' : 'of income kept', tone: rate === null ? undefined : (rate >= 0 ? 'up' : 'down') },
-    { label: 'Avg spend / month', value: fmt(spend / months), note: `${fmt(spend / Math.max(1, daysInView()))} a day` },
-    { label: 'Transactions', value: group(String(rows.length)), note: (() => {
-        const n = new Set(rows.map((r) => r.cp).filter(Boolean)).size;
-        return `${n} merchant${n === 1 ? '' : 's'}`;
-      })() },
+    { label: 'Total spent', raw: spend, format: fmt, note: `${months} month${months === 1 ? '' : 's'} in view`, hero: true, spark: spendSeries, sparkColor: ACCENT },
+    { label: 'Income', raw: income, format: fmt, note: income ? `${fmt(income / months)} a month` : 'none in range', spark: incomeSeries, sparkColor: SLOTS[0] },
+    { label: 'Net saved', raw: net, format: fmt, note: 'income minus spending', tone: net >= 0 ? 'up' : 'down', spark: netSeries, sparkColor: net >= 0 ? GOOD : BAD },
+    { label: 'Savings rate', raw: rate, format: (v) => (v === null || Number.isNaN(v) ? '—' : pct(v)), note: rate === null ? 'no income in range' : 'of income kept', tone: rate === null ? undefined : (rate >= 0 ? 'up' : 'down'), spark: monthList.map((_, i) => incomeSeries[i] > 0 ? netSeries[i] / incomeSeries[i] : null).filter((v) => v !== null), sparkColor: rate === null ? INK3 : (rate >= 0 ? GOOD : BAD) },
+    { label: 'Avg spend / month', raw: spend / months, format: fmt, note: `${fmt(spend / Math.max(1, daysInView()))} a day`, spark: spendSeries, sparkColor: SLOTS[0] },
+    { label: 'Transactions', raw: rows.length, format: (v) => group(String(Math.round(v))), note: `${nMerchants} merchant${nMerchants === 1 ? '' : 's'}`, spark: countSeries, sparkColor: SLOTS[0] },
   ];
 
   const host = document.getElementById('kpis');
   host.textContent = '';
+  const intro = kpiIntro;
+  kpiIntro = false;
   for (const tile of tiles) {
     const box = document.createElement('div');
     box.className = 'kpi' + (tile.hero ? ' hero' : '');
@@ -378,11 +405,25 @@ function renderKpis() {
     label.textContent = tile.label;
     const value = document.createElement('div');
     value.className = 'value' + (tile.tone ? ' ' + tile.tone : '');
-    value.textContent = tile.value;
+    const display = tile.raw === null ? '—' : tile.format(tile.raw);
+    if (intro && tile.raw !== null) {
+      value.textContent = tile.format(0);
+      tweenText(value, 0, tile.raw, tile.format, tile.hero ? 520 : 380);
+    } else {
+      value.textContent = display;
+    }
     const note = document.createElement('div');
     note.className = 'note';
     note.textContent = tile.note;
     box.append(label, value, note);
+    if (tile.spark && tile.spark.length > 1) {
+      const spark = document.createElement('div');
+      spark.className = 'spark';
+      spark.appendChild(sparkline(tile.spark.map((amt) => ({ amt })), {
+        width: tile.hero ? 280 : 160, height: 36, color: tile.sparkColor, fill: true,
+      }));
+      box.appendChild(spark);
+    }
     host.appendChild(box);
   }
 }
@@ -512,7 +553,7 @@ function renderTreemap() {
   }
 
   const width = Math.max(320, host.clientWidth || 900);
-  const height = Math.max(260, Math.min(460, Math.round(width * 0.42)));
+  const height = Math.max(280, Math.min(560, Math.round(width * (width > 700 ? 0.58 : 0.42))));
   const svg = svgEl('svg', { width: '100%', height, viewBox: `0 0 ${width} ${height}` });
   const tiles = squarify(items, 0, 0, width, height);
 
@@ -881,27 +922,38 @@ function renderMoM() {
 //  TAB 3 — Merchants & recurring
 // ==========================================================================
 
-function sparkline(history) {
-  const width = 190, height = 34, pad = 3;
-  const values = history.map((h) => h.amt);
+function sparkline(history, opts) {
+  opts = opts || {};
+  const width = opts.width || 190, height = opts.height || 34, pad = opts.pad || 3;
+  const color = opts.color || SLOTS[0];
+  const values = history.map((h) => (typeof h === 'number' ? h : h.amt));
   const lo = Math.min(...values), hi = Math.max(...values);
-  const span = hi - lo || 1;
-  const svg = svgEl('svg', { width, height, viewBox: `0 0 ${width} ${height}`, role: 'img' });
-  svg.setAttribute('aria-label', `${history.length} charges, ${fmt(lo)} to ${fmt(hi)}`);
+  const svg = svgEl('svg', {
+    width: '100%', height, viewBox: `0 0 ${width} ${height}`, role: 'img',
+    preserveAspectRatio: opts.fill ? 'none' : 'xMinYMid meet',
+  });
+  svg.setAttribute('aria-label', `${history.length} points, ${fmt(lo)} to ${fmt(hi)}`);
   const step = history.length > 1 ? (width - pad * 2) / (history.length - 1) : 0;
-  const points = history.map((h, i) => [
-    pad + i * step,
-    height - pad - ((h.amt - lo) / span) * (height - pad * 2),
-  ]);
+  const yOf = (amt) => hi === lo
+    ? height / 2
+    : height - pad - ((amt - lo) / (hi - lo)) * (height - pad * 2);
+  const points = values.map((amt, i) => [pad + i * step, yOf(amt)]);
+  if (opts.fill && points.length) {
+    const area = `${points[0][0]},${height - pad} ${points.map((p) => p.join(',')).join(' ')} ${points[points.length - 1][0]},${height - pad}`;
+    svg.appendChild(svgEl('polygon', { points: area, fill: color, 'fill-opacity': 0.16 }));
+  }
   svg.appendChild(svgEl('polyline', {
     points: points.map((p) => p.join(',')).join(' '),
-    fill: 'none', stroke: SLOTS[0], 'stroke-width': 2,
+    fill: 'none', stroke: color, 'stroke-width': 2,
     'stroke-linejoin': 'round', 'stroke-linecap': 'round',
   }));
   const last = points[points.length - 1];
+  const prev = values[values.length - 2];
+  const rose = opts.step && prev !== undefined && values[values.length - 1] > prev;
+  const dot = rose ? ACCENT : color;
   svg.appendChild(svgEl('circle', {
     cx: last[0], cy: last[1], r: 4,
-    fill: SLOTS[0], stroke: tok('--surface-2'), 'stroke-width': 2,
+    fill: dot, stroke: tok('--surface-2'), 'stroke-width': 2,
   }));
   return svg;
 }
@@ -945,7 +997,7 @@ function renderRecurring() {
     year.className = 'yr';
     year.textContent = `${fmt(item.annual)} a year · ${item.n} charges over ${item.months} months`;
 
-    card.append(name, cat, cost, year, sparkline(item.history));
+    card.append(name, cat, cost, year, sparkline(item.history, { step: true }));
     host.appendChild(card);
   }
 }
@@ -1032,7 +1084,8 @@ function renderCalendar() {
     return index;
   };
 
-  const CELL = 12, GAP = 3, PITCH = CELL + GAP, TOP = 20, LEFT = 32;
+  const CELL = 12, GAP = 3, PITCH = CELL + GAP, TOP = 22, LEFT = 32;
+  const today = isoLocal(new Date());
   const start = new Date(S.from + 'T00:00:00');
   const end = new Date(S.to + 'T00:00:00');
   start.setDate(start.getDate() - ((start.getDay() + 6) % 7));   // back to Monday
@@ -1069,11 +1122,18 @@ function renderCalendar() {
       if (cursor.getDate() === 1 && week - lastLabelWeek >= 3 && isoLocal(cursor) <= S.to) {
         lastLabelWeek = week;
         const month = cursor.getMonth();
-        const label = svgEl('text', { x, y: TOP - 7, fill: INK3, 'font-size': 10 });
+        const label = svgEl('text', { x, y: TOP - 8, fill: INK2, 'font-size': 10, 'font-weight': 600 });
         label.textContent = month === 0
           ? `${MONTH_NAMES[month]} ${String(cursor.getFullYear()).slice(2)}`
           : MONTH_NAMES[month];
         svg.appendChild(label);
+      }
+      if (inRange && cursor.getDate() === 1 && week > 0) {
+        svg.appendChild(svgEl('line', {
+          x1: x - GAP / 2, y1: TOP - 2,
+          x2: x - GAP / 2, y2: TOP + 7 * PITCH,
+          stroke: AXIS, 'stroke-width': 1, 'stroke-opacity': 0.65,
+        }));
       }
 
       const fill = !inRange ? 'transparent' : (stat ? RAMP[bucketOf(stat.total)] : EMPTY_CELL);
@@ -1101,6 +1161,9 @@ function renderCalendar() {
         if (S.day === iso) {
           rect.setAttribute('stroke', INK);
           rect.setAttribute('stroke-width', '2');
+        } else if (iso === today) {
+          rect.setAttribute('stroke', ACCENT);
+          rect.setAttribute('stroke-width', '2');
         }
       }
       svg.appendChild(rect);
@@ -1110,23 +1173,21 @@ function renderCalendar() {
   scroller.appendChild(svg);
   host.appendChild(scroller);
 
-  // Scale legend — a colour scale always says what its steps mean.
   const legend = document.createElement('div');
-  legend.className = 'legend';
+  legend.className = 'legend legend-ramp';
   const less = document.createElement('span');
   less.textContent = 'Quiet';
-  legend.appendChild(less);
-  RAMP.forEach((color, i) => {
-    const item = document.createElement('span');
-    const swatch = document.createElement('i');
-    swatch.style.background = color;
-    const upTo = i < cuts.length ? '≤ ' + fmt(cuts[i]) : '> ' + fmt(cuts[cuts.length - 1]);
-    item.append(swatch, document.createTextNode(upTo));
-    legend.appendChild(item);
-  });
+  const ramp = document.createElement('span');
+  ramp.className = 'ramp';
+  ramp.style.background = `linear-gradient(to right, ${RAMP.join(',')})`;
   const more = document.createElement('span');
   more.textContent = 'Heavy';
-  legend.appendChild(more);
+  const cap = document.createElement('span');
+  cap.className = 'ramp-cap';
+  cap.textContent = cuts.length
+    ? `≤ ${fmt(cuts[0])}  →  > ${fmt(cuts[cuts.length - 1])}`
+    : '';
+  legend.append(less, ramp, more, cap);
   host.appendChild(legend);
 }
 
